@@ -1,0 +1,4 @@
+redis
+milvus
+ollama
+kafka

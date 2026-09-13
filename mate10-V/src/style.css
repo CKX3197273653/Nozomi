@@ -1,0 +1,242 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* ========== 科技感渐变蓝全局主题 ========== */
+body {
+  font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  background:
+          radial-gradient(ellipse at top left, rgba(30, 64, 175, 0.35) 0%, transparent 55%),
+          radial-gradient(ellipse at bottom right, rgba(59, 130, 246, 0.25) 0%, transparent 50%),
+          linear-gradient(180deg, #07112a 0%, #0a1636 100%);
+  background-attachment: fixed;
+  color: #e0e7ff;
+  min-height: 100vh;
+}
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image:
+          linear-gradient(rgba(74, 158, 255, 0.04) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(74, 158, 255, 0.04) 1px, transparent 1px);
+  background-size: 36px 36px;
+  pointer-events: none;
+  z-index: 0;
+}
+#app {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  min-height: 100vh;
+}
+
+/* ========== 通用卡片容器（所有页面通用） ========== */
+.tech-card {
+  background: linear-gradient(145deg, rgba(15, 30, 70, 0.85) 0%, rgba(10, 22, 54, 0.9) 100%);
+  border: 1px solid rgba(74, 158, 255, 0.2);
+  border-radius: 14px;
+  padding: 18px;
+  backdrop-filter: blur(8px);
+  box-shadow:
+          0 0 0 1px rgba(74, 158, 255, 0.08) inset,
+          0 4px 24px rgba(0, 0, 0, 0.4),
+          0 0 32px rgba(59, 130, 246, 0.08);
+  transition: all 0.35s ease;
+}
+.tech-card:hover {
+  border-color: rgba(125, 180, 255, 0.45);
+  box-shadow:
+          0 0 0 1px rgba(125, 180, 255, 0.18) inset,
+          0 6px 32px rgba(0, 0, 0, 0.5),
+          0 0 48px rgba(59, 130, 246, 0.18);
+  transform: translateY(-1px);
+}
+.card-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #ffffff;
+  padding-left: 12px;
+  margin-bottom: 16px;
+  position: relative;
+  letter-spacing: 0.5px;
+}
+.card-title::before {
+  content: '';
+  position: absolute; left: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 4px; height: 16px; border-radius: 2px;
+  background: linear-gradient(180deg, #60a5fa 0%, #1e40af 100%);
+  box-shadow: 0 0 8px rgba(96, 165, 250, 0.6);
+}
+
+/* ========== 科技感按钮（胶囊渐变蓝） ========== */
+.el-button.tech-btn,
+.tech-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  border-radius: 999px;
+  padding: 8px 20px;
+  background: linear-gradient(90deg, #1e3a8a 0%, #3b82f6 100%);
+  color: #ffffff !important;
+  font-weight: 500;
+  box-shadow:
+          0 0 0 1px rgba(125, 180, 255, 0.55),
+          0 3px 12px rgba(59, 130, 246, 0.3),
+          inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  transition: all 0.3s ease;
+}
+.tech-btn:hover {
+  background: linear-gradient(90deg, #2563eb 0%, #60a5fa 100%);
+  box-shadow:
+          0 0 0 1px rgba(150, 200, 255, 0.8),
+          0 5px 20px rgba(59, 130, 246, 0.5),
+          inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  transform: translateY(-1px);
+}
+.tech-btn--ghost {
+  background: rgba(59, 130, 246, 0.12) !important;
+  color: #93c5fd !important;
+}
+.tech-btn--ghost:hover {
+  background: rgba(59, 130, 246, 0.22) !important;
+}
+
+/* ========== 深色表格（升级科技感） ========== */
+.dark-table {
+  background: transparent !important;
+  color: #e0e7ff !important;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.dark-table .el-table__inner-wrapper { background: transparent; }
+.dark-table th.el-table__cell {
+  background: linear-gradient(180deg, rgba(74, 158, 255, 0.22) 0%, rgba(74, 158, 255, 0.14) 100%) !important;
+  color: #c7d2fe !important;
+  border-bottom: 1px solid rgba(74, 158, 255, 0.3) !important;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.dark-table td.el-table__cell {
+  border-bottom: 1px solid rgba(74, 158, 255, 0.08) !important;
+}
+.dark-table tr:hover > td.el-table__cell {
+  background: rgba(59, 130, 246, 0.12) !important;
+}
+.dark-table .el-table__row.el-table__row--striped td.el-table__cell {
+  background: rgba(74, 158, 255, 0.03) !important;
+}
+.dark-table .el-table__empty-text { color: #94a3b8; }
+
+/* ========== 输入框/下拉/日期选择 ========== */
+.el-input__wrapper,
+.el-select__wrapper,
+.el-date-editor .el-input__wrapper {
+  background: rgba(15, 30, 70, 0.5) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 0 0 1px rgba(74, 158, 255, 0.25) inset !important;
+  transition: all 0.25s ease;
+}
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused,
+.el-date-editor .el-input__wrapper.is-focus {
+  box-shadow:
+          0 0 0 1px rgba(96, 165, 250, 0.9) inset,
+          0 0 0 3px rgba(59, 130, 246, 0.25),
+          0 0 16px rgba(59, 130, 246, 0.2) !important;
+}
+.el-input__inner,
+.el-select__selected-item,
+.el-date-editor .el-input__inner {
+  color: #e0e7ff !important;
+}
+.el-input__inner::placeholder { color: #64748b !important; }
+
+/* ========== 深色对话框 ========== */
+.el-dialog {
+  background: linear-gradient(145deg, #0f1e46 0%, #0a1636 100%) !important;
+  border: 1px solid rgba(74, 158, 255, 0.3) !important;
+  border-radius: 16px !important;
+  box-shadow:
+          0 0 0 1px rgba(74, 158, 255, 0.12) inset,
+          0 10px 40px rgba(0, 0, 0, 0.6),
+          0 0 64px rgba(59, 130, 246, 0.18) !important;
+}
+.el-dialog__title { color: #ffffff !important; font-weight: 600; }
+.el-dialog__body { color: #e0e7ff !important; }
+.el-descriptions__label {
+  color: #93c5fd !important;
+  background: rgba(74, 158, 255, 0.08) !important;
+}
+.el-descriptions__content { color: #e0e7ff !important; }
+.el-form-item__label { color: #c7d2fe !important; }
+.el-upload__tip { color: #94a3b8 !important; }
+
+/* ========== 深色下拉菜单 ========== */
+.el-select-dropdown {
+  background: linear-gradient(180deg, #0f1e46 0%, #0a1636 100%) !important;
+  border: 1px solid rgba(74, 158, 255, 0.3) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 32px rgba(59, 130, 246, 0.15) !important;
+}
+.el-select-dropdown__item { color: #e0e7ff !important; }
+.el-select-dropdown__item.is-hovering {
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.22), rgba(59, 130, 246, 0.08)) !important;
+  color: #ffffff !important;
+}
+.el-select-dropdown__item.is-selected {
+  color: #60a5fa !important;
+  font-weight: 600;
+}
+
+/* ========== 标签页 ========== */
+.el-tabs__item { color: #94a3b8 !important; }
+.el-tabs__item.is-active {
+  color: #60a5fa !important;
+  font-weight: 600;
+}
+.el-tabs__active-bar {
+  background: linear-gradient(90deg, #60a5fa, #1e40af) !important;
+  border-radius: 2px;
+  box-shadow: 0 0 8px rgba(96, 165, 250, 0.6);
+}
+.el-tabs__nav-wrap::after { background: rgba(74, 158, 255, 0.18) !important; }
+
+/* ========== 分页器 ========== */
+.el-pagination {
+  --el-pagination-bg-color: transparent;
+  --el-pagination-text-color: #c7d2fe;
+  --el-pagination-button-color: #c7d2fe;
+  --el-pagination-hover-color: #60a5fa;
+}
+.el-pagination .el-pager li {
+  border-radius: 8px;
+  background: rgba(15, 30, 70, 0.5);
+  margin: 0 3px;
+  border: 1px solid rgba(74, 158, 255, 0.15);
+}
+.el-pagination .el-pager li.is-active {
+  background: linear-gradient(90deg, #1e3a8a, #3b82f6) !important;
+  color: #fff !important;
+  box-shadow: 0 0 0 1px rgba(125, 180, 255, 0.5), 0 3px 12px rgba(59, 130, 246, 0.4);
+}
+
+/* ========== Tag 标签 ========== */
+.el-tag {
+  border-radius: 999px !important;
+  padding: 0 10px;
+  border: none !important;
+  font-weight: 500;
+}
+
+/* ========== 滚动条美化 ========== */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: rgba(10, 22, 54, 0.3); }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #3b82f6, #1e3a8a);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #60a5fa, #2563eb); }

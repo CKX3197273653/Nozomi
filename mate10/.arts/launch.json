@@ -1,0 +1,79 @@
+{
+    "configurations": [
+        {
+            "request": "launch",
+            "type": "javadbg",
+            "name": "Mate10Application",
+            "__internal_id": "4602f34a-f313-4a67-bc02-eed8acbfe6c7",
+            "temporary": false,
+            "withCoverage": false,
+            "mainClass": {
+                "name": "org.mate.mate10.Mate10Application",
+                "sourcePath": "${workspaceFolder}/src/main/java/org/mate/mate10/Mate10Application.java",
+                "shell": "internal-console"
+            }
+        },
+        {
+            "request": "launch",
+            "type": "javadbg",
+            "name": "mvn install",
+            "__internal_id": "28ed85e0-ce12-41f2-bf5f-4f40b7d6c3a8",
+            "temporary": true,
+            "withProfiling": false,
+            "withCoverage": false,
+            "killPrevSession": false,
+            "ignoreBuildErrors": false,
+            "verbose": false,
+            "maven": {
+                "goals": [
+                    "install"
+                ],
+                "skipTests": false,
+                "workOffline": false,
+                "profiles": []
+            }
+        },
+        {
+            "request": "launch",
+            "type": "javadbg",
+            "name": "mvn org.apache.maven.plugins:maven-clean-plugin:3.5.0:clean",
+            "__internal_id": "8240a40a-72e3-4e15-9bc8-ee624811d195",
+            "temporary": true,
+            "withProfiling": false,
+            "withCoverage": false,
+            "killPrevSession": false,
+            "ignoreBuildErrors": false,
+            "verbose": false,
+            "maven": {
+                "goals": [
+                    "org.apache.maven.plugins:maven-clean-plugin:3.5.0:clean"
+                ],
+                "skipTests": false,
+                "workOffline": false,
+                "workingDirectory": "C:/Users/CKX31/Desktop/mate/mate10",
+                "profiles": []
+            }
+        },
+        {
+            "request": "launch",
+            "type": "javadbg",
+            "name": "mvn org.apache.maven.plugins:maven-install-plugin:3.1.4:install",
+            "__internal_id": "d1dc9a91-1fe2-4d40-a340-613dcf14a70b",
+            "temporary": true,
+            "withProfiling": false,
+            "withCoverage": false,
+            "killPrevSession": false,
+            "ignoreBuildErrors": false,
+            "verbose": false,
+            "maven": {
+                "goals": [
+                    "org.apache.maven.plugins:maven-install-plugin:3.1.4:install"
+                ],
+                "skipTests": false,
+                "workOffline": false,
+                "workingDirectory": "C:/Users/CKX31/Desktop/mate/mate10",
+                "profiles": []
+            }
+        }
+    ]
+}

@@ -1,0 +1,13 @@
+<component name="libraryTable">
+  <library name="Maven: redis.clients.authentication:redis-authx-core:0.1.1-beta2">
+    <CLASSES>
+      <root url="jar://$MAVEN_REPOSITORY$/redis/clients/authentication/redis-authx-core/0.1.1-beta2/redis-authx-core-0.1.1-beta2.jar!/" />
+    </CLASSES>
+    <JAVADOC>
+      <root url="jar://$MAVEN_REPOSITORY$/redis/clients/authentication/redis-authx-core/0.1.1-beta2/redis-authx-core-0.1.1-beta2-javadoc.jar!/" />
+    </JAVADOC>
+    <SOURCES>
+      <root url="jar://$MAVEN_REPOSITORY$/redis/clients/authentication/redis-authx-core/0.1.1-beta2/redis-authx-core-0.1.1-beta2-sources.jar!/" />
+    </SOURCES>
+  </library>
+</component>

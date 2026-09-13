@@ -1,0 +1,96 @@
+package org.mate.mate10.service.Impl;
+
+import dev.langchain4j.data.document.Document;
+import dev.langchain4j.data.document.loader.FileSystemDocumentLoader;
+import dev.langchain4j.data.document.parser.TextDocumentParser;
+import dev.langchain4j.data.document.splitter.DocumentSplitters;
+import dev.langchain4j.data.embedding.Embedding;
+import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.ollama.OllamaChatModel;
+import dev.langchain4j.store.embedding.EmbeddingMatch;
+import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
+import dev.langchain4j.store.embedding.EmbeddingStore;
+import org.mate.mate10.config.ChatModelFactory;
+import org.mate.mate10.service.RagService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import java.nio.file.Path;
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Service
+public class RagServiceImpl implements RagService {
+
+    //文本转向量
+    @Autowired
+    private EmbeddingModel embeddingModel;
+    //存储和检索向量数据,存储文本片段
+    @Autowired
+    private EmbeddingStore<TextSegment> embeddingStore;
+    //调用模型回答
+    @Autowired
+    private ChatModelFactory chatModelFactory;
+
+    @Override
+    public void addDocument(Path filePath) {
+        Document document = FileSystemDocumentLoader.loadDocument(filePath, new TextDocumentParser());
+        storeDocument(document);
+    }
+
+    @Override
+    public void addDocuments(List<Path> filePaths) {
+        for (Path filePath : filePaths) {
+            addDocument(filePath);
+        }
+    }
+
+    @Override
+    public void addText(String text) {
+        Document document = Document.from(text);
+        storeDocument(document);
+    }
+
+    private void storeDocument(Document document) {
+        List<TextSegment> segments = DocumentSplitters.recursive(512, 128).split(document);
+        List<Embedding> embeddings = embeddingModel.embedAll(segments).content();
+        embeddingStore.addAll(embeddings, segments);
+    }
+    @Override
+    public String ask(String question) {
+        Embedding queryEmbedding = embeddingModel.embed(question).content();
+
+        EmbeddingSearchRequest request = EmbeddingSearchRequest.builder()
+                .queryEmbedding(queryEmbedding)
+                .maxResults(3)
+                .build();
+        List<EmbeddingMatch<TextSegment>> matches = embeddingStore.search(request).matches();
+
+        if (matches.isEmpty()) {
+            return chatModelFactory.getChatModel().chat(question);
+        }
+
+        String context = matches.stream()
+                .map(match -> match.embedded().text())
+                .collect(Collectors.joining("\n\n"));
+
+        String prompt = String.format("""
+                使用以下信息回答问题：
+
+                %s
+
+                问题：%s
+
+                如果信息中没有相关内容，请直接回答，不要编造。
+                """, context, question);
+
+        return chatModelFactory.getChatModel().chat(prompt);
+    }
+
+    @Override
+    public void clearKnowledgeBase() {
+        embeddingStore.removeAll();
+    }
+}
