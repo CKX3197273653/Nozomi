@@ -53,3 +53,7 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# IDE 索引缓存
+mate10/.jlsp/
+mate10/.arts/
