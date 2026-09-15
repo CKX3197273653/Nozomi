@@ -7,4 +7,5 @@ public class ChatRequest {
     private Long userId;
     private Long chatId;
     private String message;
+    private String mode; //general纯对话
 }

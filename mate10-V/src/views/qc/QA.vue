@@ -3,11 +3,10 @@ import { ref, reactive, nextTick, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   initQcKnowledge,
-  qcAsk,
-  ask,
   uploadKnowledge,
   clearKnowledge
 } from '@/api/rag'
+import {createChat,chatRecord} from "@/api/chat.js";
 
 // 对话消息列表
 const messageList = ref([
@@ -16,26 +15,40 @@ const messageList = ref([
     content: '你好!我是质检知识问答助手。你可以问我关于质检、缺陷、报告等相关问题。\n\n💡 提示:使用"质检问答"模式前,请先点击左侧"初始化质检知识库"。'
   }
 ])
-
+const chatId = ref(null)
+const currentUserId = () => {
+  try {
+    return JSON.parse(localStorage.getItem('user') || '{}').id
+  }catch {
+    return null
+  }
+}
+// 首次发送时创建会话
+const ensureChatId = async () => {
+  if (chatId.value) return chatId.value
+  const res = await createChat(currentUserId(), '新对话')
+  chatId.value = res.data.id
+  return chatId.value
+}
+// 新建会话
+const handleNewChat = () => {
+  chatId.value = null
+  messageList.value = [{ role: 'assistant', content: '你好！我是质检知识问答助手。' }]
+}
 //输入框
 const inputMessage = ref('')
 const sending = ref(false)
-
 //问答模式
 const mode = ref('qc')  // 'qc' = 质检问答, 'general' = 通用问答
-
 //知识库操作状态
 const initLoading = ref(false)
 const uploadLoading = ref(false)
 const clearLoading = ref(false)
-
 //上传对话框
 const uploadVisible = ref(false)
 const uploadFile = ref(null)
-
 // 自动滚动
 const chatBodyRef = ref(null)
-
 //滚动到底部
 const scrollToBottom = async () => {
   await nextTick()
@@ -43,7 +56,6 @@ const scrollToBottom = async () => {
     chatBodyRef.value.scrollTop = chatBodyRef.value.scrollHeight
   }
 }
-
 //发送消息
 const handleSend = async () => {
   const question = inputMessage.value.trim()
@@ -77,10 +89,15 @@ const handleSend = async () => {
   sending.value = true
   try {
     // 根据模式选择接口
-    const apiFn = mode.value === 'qc' ? qcAsk : ask
-    const res = await apiFn(question)
+    const cid = await ensureChatId()
+    const res = await chatRecord({
+      userId:currentUserId(),
+      chatId:cid,
+      message:question,
+      mode:mode.value === 'qc'?'qc' : 'general'
+    })
     // 更新 AI 消息内容
-    messageList.value[aiMessageIndex].content = res.data || res.msg || '暂无回复'
+    messageList.value[aiMessageIndex].content = res.data || '暂无回复'
     messageList.value[aiMessageIndex].loading = false
   } catch (error) {
     messageList.value[aiMessageIndex].content = '抱歉,回答失败,请稍后重试'
@@ -91,15 +108,12 @@ const handleSend = async () => {
     await scrollToBottom()
   }
 }
-
-
 const handleKeydown = (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     handleSend()
   }
 }
-
 // 初始化质检知识库
 const handleInitKnowledge = async () => {
   initLoading.value = true
@@ -112,17 +126,14 @@ const handleInitKnowledge = async () => {
     initLoading.value = false
   }
 }
-
 //上传知识文件
 const handleUploadClick = () => {
   uploadFile.value = null
   uploadVisible.value = true
 }
-
 const handleFileChange = (file) => {
   uploadFile.value = file.raw
 }
-
 const handleUploadSubmit = async () => {
   if (!uploadFile.value) {
     ElMessage.warning('请选择文件')
@@ -141,7 +152,6 @@ const handleUploadSubmit = async () => {
     uploadLoading.value = false
   }
 }
-
 //清空知识库
 const handleClearKnowledge = () => {
   ElMessageBox.confirm(
@@ -164,7 +174,6 @@ const handleClearKnowledge = () => {
     }
   }).catch(() => {})
 }
-
 //切换模式
 const handleModeChange = (value) => {
   const tip = value === 'qc'
@@ -172,7 +181,6 @@ const handleModeChange = (value) => {
       : '已切换到「通用问答」模式,将使用通用 AI 回答'
   ElMessage.info(tip)
 }
-
 //清空对话
 const handleClearChat = () => {
   ElMessageBox.confirm('确定要清空当前对话记录吗?', '提示', {
@@ -188,7 +196,6 @@ const handleClearChat = () => {
     ]
   }).catch(() => {})
 }
-
 //初始化
 onMounted(() => {
   scrollToBottom()

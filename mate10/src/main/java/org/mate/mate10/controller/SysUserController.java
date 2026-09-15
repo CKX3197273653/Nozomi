@@ -16,7 +16,12 @@ import java.util.Map;
 public class SysUserController {
     @Autowired
     private SysUserService sysUserService;
-    private JwtUtil jwtUtil;
+    private final JwtUtil jwtUtil;
+
+    public SysUserController(SysUserService sysUserService, JwtUtil jwtUtil) {
+        this.sysUserService = sysUserService;
+        this.jwtUtil = jwtUtil;
+    }
 
     @PostMapping("/login")
     public Result<?> login(

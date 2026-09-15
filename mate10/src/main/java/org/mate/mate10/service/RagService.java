@@ -9,4 +9,5 @@ public interface RagService {
     void addText(String text);
     String ask(String question);
     void clearKnowledgeBase();
+    String retrieve(String question);
 }

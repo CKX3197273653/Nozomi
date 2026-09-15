@@ -58,6 +58,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             } catch (Exception e) {
                 // token 无效或过期：不设置认证信息，让后面的授权规则拒绝
                 SecurityContextHolder.clearContext();
+                logger.error("Authentication failed: ", e);
             }
         }
 

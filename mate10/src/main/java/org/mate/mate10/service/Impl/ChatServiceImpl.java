@@ -19,11 +19,9 @@ import java.util.Map;
 @Service
 @RequiredArgsConstructor
 public class ChatServiceImpl extends ServiceImpl<ChatMapper, Chat> implements ChatService {
+    private final  ChatRecordService chatRecordService;
 
-
-    private ChatRecordService chatRecordService;
-
-    private ChatRecordMapper chatRecordMapper;
+    private final  ChatRecordMapper chatRecordMapper;
 
     @Override
     public Chat createChat(Long userId,String title){

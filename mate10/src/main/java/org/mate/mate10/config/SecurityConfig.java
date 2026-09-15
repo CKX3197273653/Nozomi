@@ -1,5 +1,6 @@
 package org.mate.mate10.config;
 
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -36,7 +37,22 @@ public class SecurityConfig {
                         // 其他全部需要认证
                         .anyRequest().authenticated()
                 )
-                // 4. 把 JWT 过滤器加到用户名密码过滤器之前
+                // 4.区分 401 和 403
+                .exceptionHandling(ex -> ex
+                        // 未认证（没带 token / token 无效或过期）→ 401
+                        .authenticationEntryPoint((request, response, authException) -> {
+                            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                            response.setContentType("application/json;charset=UTF-8");
+                            response.getWriter().write("{\"code\":401,\"msg\":\"登录已过期，请重新登录\"}");
+                        })
+                        // 已认证但没有权限 → 403
+                        .accessDeniedHandler((request, response, accessDeniedException) -> {
+                            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                            response.setContentType("application/json;charset=UTF-8");
+                            response.getWriter().write("{\"code\":403,\"msg\":\"没有权限\"}");
+                        })
+                )
+                // 5. 把 JWT 过滤器加到用户名密码过滤器之前
                 .addFilterBefore(jwtAuthenticationFilter,
                         UsernamePasswordAuthenticationFilter.class);
 

@@ -60,21 +60,10 @@ public class RagServiceImpl implements RagService {
     }
     @Override
     public String ask(String question) {
-        Embedding queryEmbedding = embeddingModel.embed(question).content();
-
-        EmbeddingSearchRequest request = EmbeddingSearchRequest.builder()
-                .queryEmbedding(queryEmbedding)
-                .maxResults(3)
-                .build();
-        List<EmbeddingMatch<TextSegment>> matches = embeddingStore.search(request).matches();
-
-        if (matches.isEmpty()) {
+        String context = retrieve(question);
+        if (context == null || context.isEmpty()) {
             return chatModelFactory.getChatModel().chat(question);
         }
-
-        String context = matches.stream()
-                .map(match -> match.embedded().text())
-                .collect(Collectors.joining("\n\n"));
 
         String prompt = String.format("""
                 使用以下信息回答问题：
@@ -92,5 +81,22 @@ public class RagServiceImpl implements RagService {
     @Override
     public void clearKnowledgeBase() {
         embeddingStore.removeAll();
+    }
+
+    @Override
+    public String retrieve(String question) {
+        Embedding queryEmbedding = embeddingModel.embed(question).content();
+        EmbeddingSearchRequest request = EmbeddingSearchRequest.builder()
+                .queryEmbedding(queryEmbedding)
+                .maxResults(3)
+                .build();
+
+        List<EmbeddingMatch<TextSegment>> matches = embeddingStore.search(request).matches();
+        if (matches.isEmpty()) {
+            return null;
+        }
+        return matches.stream()
+                .map(m -> m.embedded().text())
+                .collect(Collectors.joining("\n\n"));
     }
 }

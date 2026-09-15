@@ -13,4 +13,6 @@ public interface MongoChatMessageService {
     List<ChatMessageDocument> getMessageByUserId(Long userId);
 
     List<ChatMessageDocument> getMessageByChatIdAndRole(Long chatId, String role);
+
+    List<ChatMessageDocument> getRecentMessages(Long chatId, int maxHistoryMessages);
 }
