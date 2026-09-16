@@ -6,13 +6,13 @@ import {
   uploadKnowledge,
   clearKnowledge
 } from '@/api/rag'
-import {createChat,chatRecord} from "@/api/chat.js";
+import {createChat,chatStream } from "@/api/chat.js";
 
 // 对话消息列表
 const messageList = ref([
   {
     role: 'assistant',
-    content: '你好!我是质检知识问答助手。你可以问我关于质检、缺陷、报告等相关问题。\n\n💡 提示:使用"质检问答"模式前,请先点击左侧"初始化质检知识库"。'
+    content: '你好!我是质检知识问答助手。你可以问我关于质检、缺陷、报告等相关问题。\n\n 提示:使用"质检问答"模式前,请先点击左侧"初始化质检知识库"。'
   }
 ])
 const chatId = ref(null)
@@ -67,7 +67,6 @@ const handleSend = async () => {
     ElMessage.warning('AI 正在思考中,请稍候')
     return
   }
-
   //添加用户消息
   messageList.value.push({
     role: 'user',
@@ -84,20 +83,25 @@ const handleSend = async () => {
     loading: true
   })
   await scrollToBottom()
-
   // 调用接口
   sending.value = true
   try {
     // 根据模式选择接口
     const cid = await ensureChatId()
-    const res = await chatRecord({
+    await chatStream({
       userId:currentUserId(),
       chatId:cid,
       message:question,
       mode:mode.value === 'qc'?'qc' : 'general'
-    })
+    },
+        (chunk) => {
+      //每收到一段就追加到消息里
+          messageList.value[aiMessageIndex].content += chunk
+          scrollToBottom()
+        }
+    )
+
     // 更新 AI 消息内容
-    messageList.value[aiMessageIndex].content = res.data || '暂无回复'
     messageList.value[aiMessageIndex].loading = false
   } catch (error) {
     messageList.value[aiMessageIndex].content = '抱歉,回答失败,请稍后重试'
@@ -309,11 +313,9 @@ onMounted(() => {
                 {{ msg.role === 'user' ? '我' : 'AI 助手' }}
               </div>
               <div class="message-text">
-                <div v-if="msg.loading" class="loading-dots">
-                  <span></span><span></span><span></span>
-                  AI 正在思考...
-                </div>
-                <pre v-else>{{ msg.content }}</pre>
+                <pre v-if="msg.content">{{ msg.content }}</pre>
+                <div v-if="msg.loading && !msg.content" class="loading-dots">
+                  <span></span><span></span><span></span>AI 正在思考...</div>
               </div>
             </div>
           </div>

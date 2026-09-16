@@ -1,12 +1,15 @@
 package org.mate.mate10.config;
 
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
 import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
+import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
+import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.store.embedding.milvus.MilvusEmbeddingStore;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -27,7 +30,7 @@ public class LangChain4jConfig {
         this.milvusProperties = m;
     }
 
-    // ================= 对话模型 =================
+    //对话模型
 
     @Bean
     @Profile("ollama")
@@ -48,7 +51,7 @@ public class LangChain4jConfig {
                 .build();
     }
 
-    // ================= Embedding 模型 =================
+    // Embedding 模型
 
     @Bean
     @Profile("ollama")
@@ -70,7 +73,7 @@ public class LangChain4jConfig {
                 .build();
     }
 
-    // ================= 向量库 =================
+    //向量库
 
     @Bean
     public MilvusEmbeddingStore milvusEmbeddingStore() {
@@ -80,6 +83,25 @@ public class LangChain4jConfig {
                 .dimension(milvusProperties.getDimension())
                 .username(milvusProperties.getUsername())
                 .password(milvusProperties.getPassword())
+                .build();
+    }
+
+    //流式对话模型
+    @Bean
+    @Profile("ollama")
+    public StreamingChatModel ollamaStreamingChatModel() {
+        return OllamaStreamingChatModel.builder()
+                .baseUrl(ollamaProperties.getBaseUrl())
+                .modelName(ollamaProperties.getDefaultModel())
+                .build();
+    }
+    @Bean
+    @Profile("cloud")
+    public StreamingChatModel cloudStreamingChatModel() {
+        return OpenAiStreamingChatModel.builder()
+                .baseUrl(cloudAiProperties.getChat().getBaseUrl())
+                .apiKey(cloudAiProperties.getChat().getApiKey())
+                .modelName(cloudAiProperties.getChat().getModel())
                 .build();
     }
 }
