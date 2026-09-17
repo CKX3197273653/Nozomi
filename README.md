@@ -1,3 +1,5 @@
+  ![CI](https://github.com/CKX3197273653/Nozomi/actions/workflows/ci.yml/badge.svg)
+
 <img width="2560" height="1440" alt="3830503fe61f495d8c946f130b5e439c" src="https://github.com/user-attachments/assets/de85ff6a-5f65-4bbf-ab37-3e788ad69d26" />
 <img width="2560" height="1440" alt="ddc822d29b52960fc49b5f18688e7779" src="https://github.com/user-attachments/assets/0b265388-5c64-44b5-a4bc-dc94087f350f" />
 <img width="2560" height="1440" alt="b14ea0291f802e318c13cb00f529d6e4" src="https://github.com/user-attachments/assets/a750190e-c9c5-41a6-9f12-a089e9d646f3" />

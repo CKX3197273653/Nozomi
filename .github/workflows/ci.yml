@@ -1,5 +1,3 @@
-  ![CI](https://github.com/CKX3197273653/Nozomi/actions/workflows/ci.yml/badge.svg)
-
   name: CI
 
   on:
