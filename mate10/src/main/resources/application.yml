@@ -1,94 +1,39 @@
 spring:
   application:
     name: mate10
-  datasource:
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/mate10db?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
-    username: root
-    password: root
-  mongodb:
-    uri: mongodb://root:root@localhost:27017/mate10db?authSource=admin
-  data:
-    redis:
-      host: localhost
-      port: 6379
-      password:
-      database: 0
-      lettuce:
-        pool:
-          max-active: 50
-          max-wait: 3000ms
-          max-idle: 20
-          min-idle: 5
-      timeout: 3000ms
+  profiles:
+    active: dev,cloud          # 默认：开发环境 + 云端AI（可被启动参数覆盖）
   kafka:
-    bootstrap-servers: localhost:9092
-    # 生产者
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
-    # 消费者
     consumer:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       group-id: mate10-group
       auto-offset-reset: earliest
-  profiles:
-    active: cloud   #ollama离线/cloud(在线) 切换
 
-# MyBatis-Plus
 mybatis-plus:
-  mapper-locations: classpath*:mapper/**/*.xml #传递扫描xml
+  mapper-locations: classpath*:mapper/**/*.xml
   type-aliases-package: org.mate.mate10.entity
   configuration:
     map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl #日志
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
   global-config:
     db-config:
       id-type: auto
 
-#Milvus配置
-milvus:
-  host: 127.0.0.1
-  port: 19530
-  dimension: 384
-  collection-name: rag_documents
-  username: root
-  password: root
-
-#Tesseract配置
-tesseract:
-  path: ${TESSERACT_PATH:I:\OCR\tesseract-main}
-  data-path: ${TESSERACT_DATA_PATH:I:\OCR\tesseract-main\tessdata}
-  language: "chi_sim"
----
-# 离线本地:ollama
-spring:
-  config:
-    activate:
-      on-profile: ollama
-ollama:
-  base-url: http://localhost:11434
-  default-model: deepseek-r1:latest
-  embedding-model: all-minilm:latest
----
-#在线deepseek+智谱 embedding
-spring:
-  config:
-    activate:
-      on-profile: cloud
-cloud-ai:
+app:
+  rag:
+    top-k: 10
+    max-chunk-chars: 400
+    chunk-size: 512
+    chunk-overlap: 128
+    use-heading-split: true
   chat:
-    base-url: https://api.deepseek.com/v1
-    api-key: ${DEEPSEEK_API_KEY:sk-占位符}
-    model: deepseek-chat
-  embedding:
-    base-url: https://open.bigmodel.cn/api/paas/v4
-    api-key: ${ZHIPU_API_KEY:占位符}
-    model: embedding-3
-    dimensions: 2048
-# cloud 模式使用独立的 2048 维向量集合（智谱 embedding-3 默认输出维度）
-milvus:
-  collection-name: rag_documents_2048
-  dimension: 2048
+    max-history-messages: 10
+    max-history-chars: 2000
+    system-prompt: "你是质检知识助手，回答简洁、准确。"
 
+tesseract:
+  language: "chi_sim"

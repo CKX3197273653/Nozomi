@@ -41,11 +41,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 Claims claims = jwtUtil.parseToken(token);
 
                 String username = claims.get("username", String.class);
+                Integer role = claims.get("role", Integer.class);
 
                 if (username != null) {
                     // 构造认证信息（角色可以按需扩展）
                     List<SimpleGrantedAuthority> authorities = new ArrayList<>();
-                    authorities.add(new SimpleGrantedAuthority("ROLE_USER"));
+                    authorities.add(new SimpleGrantedAuthority(
+                            (role != null && role == 1) ? "ROLE_ADMIN" : "ROLE_USER"));
 
                     UsernamePasswordAuthenticationToken authentication =
                             new UsernamePasswordAuthenticationToken(username, null, authorities);

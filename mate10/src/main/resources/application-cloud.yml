@@ -1,0 +1,14 @@
+cloud-ai:
+  chat:
+    base-url: https://api.deepseek.com/v1
+    api-key: ${DEEPSEEK_API_KEY}
+    model: deepseek-chat
+  embedding:
+    base-url: https://open.bigmodel.cn/api/paas/v4
+    api-key: ${ZHIPU_API_KEY}
+    model: embedding-3
+    dimensions: 2048
+
+milvus:
+  collection-name: rag_documents_2048
+  dimension: 2048

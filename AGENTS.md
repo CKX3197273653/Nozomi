@@ -20,6 +20,34 @@
 - Maven 3.8+（本机无全局 mvn，使用 IDEA 内置 Maven：
   `I:\IDEA\IntelliJ IDEA 2023.3.3\plugins\maven\lib\maven3\bin\mvn.cmd`）
 
+## 生产部署环境变量清单
+
+### 数据库与中间件
+MYSQL_URL=jdbc:mysql://<地址>:3306/mate10db?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+MYSQL_USERNAME=<用户名>
+MYSQL_PASSWORD=<强密码>
+MONGODB_URI=mongodb://<用户>:<密码>@<地址>:27017/mate10db?authSource=admin
+REDIS_HOST=<地址>
+REDIS_PORT=6379
+REDIS_PASSWORD=<密码>
+KAFKA_SERVERS=<地址>:9092
+MILVUS_HOST=<地址>
+MILVUS_PORT=19530
+MILVUS_USERNAME=<用户名>
+MILVUS_PASSWORD=<密码>
+
+### 文件处理
+TESSERACT_PATH=<生产环境的 Tesseract 路径>
+TESSERACT_DATA_PATH=<生产环境的 tessdata 路径>
+
+### 安全（生产必须重新生成，不能复用开发的）
+JWT_SECRET_KEY=<生产新生成的 64 字节密钥>
+DEEPSEEK_API_KEY=<生产的新 key>
+ZHIPU_API_KEY=<生产的新 key>
+
+### Spring
+SPRING_PROFILES_ACTIVE=prod,cloud
+
 ### 启动与构建
 
 ```bash

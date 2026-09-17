@@ -1,0 +1,8 @@
+ollama:
+  base-url: http://localhost:11434
+  default-model: deepseek-r1:latest
+  embedding-model: all-minilm:latest
+
+milvus:
+  collection-name: rag_documents
+  dimension: 384

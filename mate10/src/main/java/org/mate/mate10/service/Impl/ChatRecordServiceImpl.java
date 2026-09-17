@@ -82,7 +82,7 @@ public class ChatRecordServiceImpl implements ChatRecordService {
             String keyword = response.aiMessage().text();
             return keyword.trim().replaceAll("[\\[\\]\"]", "");
         }catch (Exception e){
-            e.printStackTrace();
+            log.error("关键字提取失败, question={}", question, e);
             return "默认";
         }
 }

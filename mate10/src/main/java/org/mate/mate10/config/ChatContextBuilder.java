@@ -17,22 +17,19 @@ import java.util.List;
 @Component
 @Slf4j
 public class ChatContextBuilder {
-
-    private static final int MAX_HISTORY_MESSAGES = 10;
-    private static final int MAX_HISTORY_CHARS = 2000;
-    private static final String SYSTEM_PROMPT = "你是质检知识助手，回答简洁、准确。";
-
+    private final ChatProperties chatProperties;
     private final MongoChatMessageService messageService;
     private final RagService ragService;
 
-    public ChatContextBuilder(MongoChatMessageService messageService, RagService ragService) {
+    public ChatContextBuilder(MongoChatMessageService messageService, RagService ragService,  ChatProperties chatProperties) {
         this.messageService = messageService;
         this.ragService = ragService;
+        this.chatProperties = chatProperties;
     }
 
     public List<ChatMessage> build(Long chatId, String question,String mode) {
         List<ChatMessage> messages = new ArrayList<>();
-        messages.add(SystemMessage.from(SYSTEM_PROMPT));
+        messages.add(SystemMessage.from(chatProperties.getSystemPrompt()));
         if ("qc".equals(mode)) {
             String context = ragService.retrieve(question);
             if (context != null && !context.isBlank()) {
@@ -52,7 +49,7 @@ public class ChatContextBuilder {
             return List.of();
         }
         List<ChatMessageDocument> history =
-                messageService.getRecentMessages(chatId, MAX_HISTORY_MESSAGES);
+                messageService.getRecentMessages(chatId, chatProperties.getMaxHistoryMessages());
 
         List<ChatMessage> picked = new ArrayList<>();
         int used = 0;
@@ -61,7 +58,7 @@ public class ChatContextBuilder {
             if (content == null || content.isBlank()) {
                 continue;
             }
-            if (used + content.length() > MAX_HISTORY_CHARS) {
+            if (used + content.length() > chatProperties.getMaxHistoryChars()) {
                 break;
             }
             used += content.length();

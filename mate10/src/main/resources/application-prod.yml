@@ -1,0 +1,41 @@
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${MYSQL_URL}
+    username: ${MYSQL_USERNAME}
+    password: ${MYSQL_PASSWORD}
+  mongodb:
+    uri: ${MONGODB_URI}
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      lettuce:
+        pool:
+          max-active: 200
+          max-idle: 50
+          min-idle: 10
+          max-wait: 3000ms
+      timeout: 3000ms
+  kafka:
+    bootstrap-servers: ${KAFKA_SERVERS}
+
+milvus:
+  host: ${MILVUS_HOST}
+  port: ${MILVUS_PORT:19530}
+  username: ${MILVUS_USERNAME:}
+  password: ${MILVUS_PASSWORD:}
+
+tesseract:
+  path: ${TESSERACT_PATH}
+  data-path: ${TESSERACT_DATA_PATH}
+
+app:
+  error:
+    detail: false
+
+logging:
+  level:
+    root: warn
+    org.mate.mate10: INFO

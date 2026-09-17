@@ -8,6 +8,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.ollama.OllamaChatModel;
+import lombok.extern.slf4j.Slf4j;
 import org.mate.mate10.config.ChatModelFactory;
 import org.mate.mate10.entity.qc.QcDefect;
 import org.mate.mate10.entity.qc.QcProductionParam;
@@ -25,7 +26,7 @@ import org.springframework.util.StringUtils;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
+@Slf4j
 @Service
 public class QcReportServiceImpl implements QcReportService {
     @Autowired
@@ -73,14 +74,13 @@ public class QcReportServiceImpl implements QcReportService {
         try {
             //空值检查
             if (fileContent == null ||fileContent.isEmpty()){
-                System.out.println("AI分析:文件内容为空,--即将跳过--");
+                log.warn("AI分析: 文件内容为空,跳过");
                 return new  java.util.ArrayList<>();
             }
             String finalPrompt = (prompt != null && !prompt.isEmpty())
                     ? prompt
                     : getDefaultAnalyzePrompt();
-            System.out.println("【AI分析】使用的Prompt长度：" + finalPrompt.length());
-            System.out.println("【AI分析】文件内容长度：" + fileContent.length());
+            log.debug("AI分析：Prompt长度={}, 文件内容长度={}", finalPrompt.length(), fileContent.length());
             //构建完整消息
             String fullMessage = finalPrompt + "\n\n【质检报告内容】\n" + fileContent;
             //调用AI
@@ -90,12 +90,11 @@ public class QcReportServiceImpl implements QcReportService {
             ChatMessage userMessage = UserMessage.from(fullMessage);
 ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
             String aiResponse = response.aiMessage().text();
-            System.out.println("【AI分析】AI 返回结果长度：" + (aiResponse != null ? aiResponse.length() : 0));
+            log.debug("AI分析: 返回结果长度" + (aiResponse != null ? aiResponse.length() : 0));
             //返回AI解析
             return parseAiResponse(aiResponse, reportId);
         }catch (Exception e) {
-            System.err.println("【AI分析】缺陷识别失败：" + e.getMessage());
-            e.printStackTrace();
+            log.error("AI分析: 缺陷识别失败" +  e.getMessage() + e);
             return new java.util.ArrayList<>();
         }
     }
@@ -139,7 +138,7 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
 
             com.fasterxml.jackson.databind.JsonNode defectsNode = root.get("defects");
             if (defectsNode == null || !defectsNode.isArray()) {
-                System.out.println("【AI分析】AI 返回格式错误，没有 defects 数组");
+                log.warn("AI分析: 返回格式错误,没有 defects" );
                 return defects;
             }
 
@@ -160,11 +159,10 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
                 defects.add(defect);
             }
 
-            System.out.println("【AI分析】解析完成，识别到 " + defects.size() + " 个缺陷");
+            log.info("AI分析：解析完成，识别到 {} 个缺陷", defects.size());
 
         } catch (Exception e) {
-            System.err.println("【AI分析】JSON 解析失败：" + e.getMessage());
-            e.printStackTrace();
+            log.error("AI分析:JSON 解析失败" + e.getMessage(),e);
         }
 
         return defects;
@@ -288,7 +286,7 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
 
             kafkaTemplate.send("qc-report-topic", json);
 
-            System.out.println("Kafka消息发送成功,reportId:"+reportId);
+            log.info("Kafka消息发送成功,reportId:"+reportId);
         }catch (com.fasterxml.jackson.core.JsonProcessingException e){
             throw new RuntimeException("Kafka序列化失败",e);
         }
@@ -307,14 +305,13 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
             String fileUrl = (String)msg.get("fileUrl");
             String fileType = (String)msg.get("fileType");
             String prompt = (String)msg.get("prompt");
-            System.out.println("Kafka消费者接受到消息,reportId"+reportId);
+            log.info("Kafka消费者接收到消息"+reportId);
 
             //调用业务方法处理
             processAnalyzeTask(reportId,fileUrl,fileType,prompt);
-            System.out.println("Kafka消费者消息处理成功,reportId"+reportId);
+            log.info("Kafka消费者消息处理成功"+ reportId);
         }catch (Exception e){
-            System.err.println("Kafka消费者消息处理失败"+e.getMessage());
-            e.printStackTrace();
+            log.error("Kafka消息处理失败"+e.getMessage(),e);
         }
     }
 
@@ -322,12 +319,12 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
     @Override
     public void processAnalyzeTask(Long reportId, String fileUrl, String fileType,String prompt) {
       try{
-          System.out.println("业务处理-分析报告:"+reportId);
+          log.info("业务处理-分析报告"+reportId);
           //状态更改为 PROCESSING
           updateStatus(reportId,"PROCESSING");
           //读取文件内容
           String fileContent = readFileContent(fileUrl,fileType);
-          System.out.println("业务处理-提取文件长度"+(fileContent != null ? fileContent.length() : 0));
+          log.info("业务处理-提取文件长度"+(fileContent != null ? fileContent.length() : 0));
 
           java.util.List<org.mate.mate10.entity.qc.QcDefect> defects = analyzeDefectsByAI(reportId,fileContent,prompt);
 
@@ -339,10 +336,10 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
           updateDefectCount(reportId,defectCount,severityLevel);
           updateStatus(reportId,"COMPLETED");
 
-          System.out.println("业务处理-报告分析完毕,reportId"+reportId+"缺陷数:"+defectCount);
+          log.info("业务处理-报告分析完毕"+reportId+"缺陷数:"+defectCount);
       }catch (Exception e){
           updateStatus(reportId,"FAILED");
-          System.err.println("业务处理-报告分析失败,reportId"+reportId+"原因:"+e.getMessage());
+          log.error("报告分析失败, reportId={}", reportId, e);
           throw new RuntimeException("报告分析失败",e);
       }
     }
@@ -397,15 +394,14 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
             dev.langchain4j.data.message.ChatMessage userMessage = dev.langchain4j.data.message.UserMessage.from(prompt);
             dev.langchain4j.model.chat.response.ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
            String aiResponse = response.aiMessage().text();
-           System.out.println("【根因分析】AI 返回长度：" + (aiResponse != null ? aiResponse.length() : 0));
+           log.debug("根因分析AI 返回长度"+ (aiResponse != null ? aiResponse.length() : 0));
            //解析
            result = parseRootCauseResponse(aiResponse);
            //附加原始数据
            result.put("defectCount", defects.size());
            result.put("severityLevel", report.getSeverityLevel());
        } catch (Exception e) {
-           System.err.println("【根因分析】失败：" + e.getMessage());
-           e.printStackTrace();
+           log.error("根因分析 失败"+e.getMessage(),e);
            result.put("error", "根因分析失败：" + e.getMessage());
        }
        return result;
@@ -509,7 +505,7 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
             result.put("rootCauses", rootCauses);
 
         } catch (Exception e) {
-            System.err.println("【根因分析】JSON 解析失败：" + e.getMessage());
+            log.error("根因分析 JSON解析失败" + e.getMessage());
             result.put("error", "AI 返回解析失败");
             result.put("rawResponse", aiResponse);
         }

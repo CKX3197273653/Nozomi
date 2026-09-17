@@ -5,6 +5,7 @@ import org.mate.mate10.entity.SysUser;
 import org.mate.mate10.service.SysUserService;
 import org.mate.mate10.util.JwtUtil;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
@@ -85,12 +86,10 @@ public class SysUserController {
             return Result.error("注册失败，请重试");
         }
     }
+
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/add")
-    public Result<?> addUser(@RequestBody SysUser sysUser,
-                             @RequestParam Integer role){
-        if (role == null || role != 1){
-            return Result.error("无权限,你该鸡毛");
-        }
+    public Result<?> add(@RequestBody SysUser sysUser){
         boolean success = sysUserService.addUser(sysUser);
         if (success){
             return Result.success();
@@ -99,12 +98,9 @@ public class SysUserController {
         }
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @PutMapping("/update")
-    public Result<?> updateUser(@RequestBody SysUser sysUser,
-                                @RequestParam Integer role){
-        if (role == null || role != 1){
-            return Result.error("没权限,你改鸡毛");
-        }
+    public Result<?> updateUser(@RequestBody SysUser sysUser){
         boolean success = sysUserService.updateUser(sysUser);
         if (success){
             return Result.success();
@@ -141,12 +137,9 @@ public class SysUserController {
                 return Result.error("修改失败:用户不存在,旧密码错了,新旧密码不能是空的");
             }
     }
+    @PreAuthorize("hasRole('ADMIN')")
     @PutMapping("/disable/{userId}")
-    public Result<?> disableUser(@PathVariable Long userId,
-                                 @RequestParam Integer role){
-        if (role == null || role != 1){
-            return Result.error("无权限,你该鸡毛");
-        }
+    public Result<?> disableUser(@PathVariable Long userId){
         boolean success = sysUserService.disableUser(userId);
         if (success){
             return Result.success();
@@ -154,12 +147,9 @@ public class SysUserController {
             return Result.error("禁用失败,用户不能不存在,也可能被禁用过了");
         }
     }
+    @PreAuthorize("hasRole('ADMIN')")
     @DeleteMapping("/delete/{userId}")
-    public Result<?> deleteUser(@PathVariable Long userId,
-                                @RequestParam Integer role){
-        if (role == null || role != 1){
-            return Result.error("无权限,你该鸡毛");
-        }
+    public Result<?> deleteUser(@PathVariable Long userId){
         boolean success = sysUserService.deleteUser(userId);
         if (success){
             return Result.success();

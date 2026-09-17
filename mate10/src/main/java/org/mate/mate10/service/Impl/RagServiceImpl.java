@@ -13,6 +13,7 @@ import dev.langchain4j.store.embedding.EmbeddingMatch;
 import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import org.mate.mate10.config.ChatModelFactory;
+import org.mate.mate10.config.RagProperties;
 import org.mate.mate10.service.RagService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -35,12 +36,11 @@ public class RagServiceImpl implements RagService {
     //调用模型回答
     @Autowired
     private ChatModelFactory chatModelFactory;
+    private final RagProperties ragProperties;
 
-    private static final int MAX_CHUNK_CHARS = 400;
-
-    //粒度控制
-    private static final boolean USE_HEADING_SPLIT = true;
-//    private static final boolean USE_HEADING_SPLIT = false;
+    public RagServiceImpl(RagProperties ragProperties) {
+        this.ragProperties = ragProperties;
+    }
 
     @Override
     public void addDocument(Path filePath) {
@@ -62,10 +62,12 @@ public class RagServiceImpl implements RagService {
     }
 
     private void storeDocument(Document document) {
-        List<TextSegment> segments = USE_HEADING_SPLIT
+        List<TextSegment> segments = ragProperties.isUseHeadingSplit()
                 ? splitByHeading(document)
-                : DocumentSplitters.recursive(512,128).split(document);
-
+                : DocumentSplitters.recursive(
+                        ragProperties.getChunkSize(),
+                        ragProperties.getChunkOverlap())
+                .split(document);
         List<Embedding> embeddings = embeddingModel.embedAll(segments).content();
         embeddingStore.addAll(embeddings, segments);
     }
@@ -89,11 +91,11 @@ public class RagServiceImpl implements RagService {
             String context = (t.startsWith("# ") || title.isEmpty())
                     ? t
                     : title + "\n\n" + t;
-            if (context.length() <= MAX_CHUNK_CHARS) {
+            if (context.length() <= ragProperties.getMaxChunkChars()) {
                 result.add(TextSegment.from(context,document.metadata()));
             }else {
                 result.addAll(
-                        DocumentSplitters.recursive(MAX_CHUNK_CHARS,50)
+                        DocumentSplitters.recursive(ragProperties.getMaxChunkChars(),50)
                                 .split(Document.from(context))
                 );
             }
@@ -130,7 +132,7 @@ public class RagServiceImpl implements RagService {
         Embedding queryEmbedding = embeddingModel.embed(question).content();
         EmbeddingSearchRequest request = EmbeddingSearchRequest.builder()
                 .queryEmbedding(queryEmbedding)
-                .maxResults(10)
+                .maxResults(ragProperties.getTopk())
                 .build();
 
         List<EmbeddingMatch<TextSegment>> matches = embeddingStore.search(request).matches();
