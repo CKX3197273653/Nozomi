@@ -231,6 +231,29 @@ npm run preview   # 预览构建结果
 > 换环境必改项：`TESSERACT_PATH`、数据库密码（`application.yml` 中 root/root）、
 > Kafka 路径与 wmic 修复、Windows Defender 排除目录。
 
+### Docker 部署注意
+
+- **Kafka 需要第二个 listener**：容器内访问必须走独立端口
+  （`listeners` 加 `PLAINTEXT_DOCKER://:9094`，
+  `advertised.listeners` 加 `PLAINTEXT_DOCKER://host.docker.internal:9094`，
+  `listener.security.protocol.map` 同步加映射），容器侧用 `host.docker.internal:9094`
+- **Docker Desktop 重启后 Hyper-V 会动态圈占端口**：若报
+  `An attempt was made to access a socket in a way forbidden`，
+  用管理员执行 `net stop winnat` → `netsh int ipv4 add excludedportrange protocol=tcp startport=19530 numberofports=1` → `net start winnat`
+- **镜像内 Tesseract 路径**：`/usr/bin/tesseract` + `/usr/share/tesseract-ocr/5/tessdata`
+- **prod 配置刻意无默认值**：`MILVUS_USERNAME` 等缺失时启动即失败（fail-fast）
+
+### 无害告警（不用处理）
+
+- `mapperLocations ... not found`：项目用 MyBatis-Plus 注解方式，无 XML 映射文件
+- `UserDetailsServiceAutoConfiguration`：Spring Security 默认用户提示
+- `TESSERACT_PATH` 配了但代码只用 `dataPath`（见 `FileParseServiceImpl`）
+
+### 接口参数风格不统一（历史遗留）
+
+- `/blocker/user/login` 用 `@RequestParam`（表单/查询参数）
+- `/blocker/user/register` 用 `@RequestBody`（JSON）
+
 ---
 
 ## 版本里程碑

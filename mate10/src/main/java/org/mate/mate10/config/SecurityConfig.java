@@ -35,8 +35,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // 放行：登录、注册、Swagger
                         .requestMatchers("/blocker/user/login", "/blocker/user/register").permitAll()
-                        .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
-                        // 其他全部需要认证
+                        .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()                        // 其他全部需要认证
                         .anyRequest().authenticated()
                 )
                 // 4.区分 401 和 403

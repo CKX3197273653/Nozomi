@@ -24,8 +24,8 @@ spring:
 milvus:
   host: ${MILVUS_HOST}
   port: ${MILVUS_PORT:19530}
-  username: ${MILVUS_USERNAME:}
-  password: ${MILVUS_PASSWORD:}
+  username: ${MILVUS_USERNAME}
+  password: ${MILVUS_PASSWORD}
 
 tesseract:
   path: ${TESSERACT_PATH}
