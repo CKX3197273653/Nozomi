@@ -136,7 +136,7 @@ services:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
       ZHIPU_API_KEY: ${ZHIPU_API_KEY}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
 
   frontend:
     image: swr.cn-north-4.myhuaweicloud.com/nozomi/mate10-frontend:0.5.0
@@ -146,8 +146,33 @@ services:
       - backend
     ports:
       - "80:80"
+# 监控
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: mate10-prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: mate10-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
 
 volumes:
+  prometheus-data:
+  grafana-data:
   mysql-data:
   mongo-data:
   redis-data:

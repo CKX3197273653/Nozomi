@@ -39,3 +39,8 @@ logging:
   level:
     root: info
     org.mate.mate10: DEBUG
+
+  management:
+    endpoint:
+      health:
+        show-details: always

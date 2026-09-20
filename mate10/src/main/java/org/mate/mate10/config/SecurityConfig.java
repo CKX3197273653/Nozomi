@@ -26,19 +26,20 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                // 1. 关闭 CSRF（前后端分离 + JWT 无状态，不需要）
+                // 关闭 CSRF（前后端分离 + JWT 无状态，不需要）
                 .csrf(csrf -> csrf.disable())
-                // 2. 无状态会话（JWT 不需要 Session）
+                // 无状态会话（JWT 不需要 Session）
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                // 3. 授权规则
+                // 授权规则
                 .authorizeHttpRequests(auth -> auth
                         // 放行：登录、注册、Swagger
                         .requestMatchers("/blocker/user/login", "/blocker/user/register").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()                        // 其他全部需要认证
                         .anyRequest().authenticated()
                 )
-                // 4.区分 401 和 403
+                //区分 401 和 403
                 .exceptionHandling(ex -> ex
                         // 未认证（没带 token / token 无效或过期）→ 401
                         .authenticationEntryPoint((request, response, authException) -> {
@@ -53,7 +54,7 @@ public class SecurityConfig {
                             response.getWriter().write("{\"code\":403,\"msg\":\"没有权限\"}");
                         })
                 )
-                // 5. 把 JWT 过滤器加到用户名密码过滤器之前
+                // 把 JWT 过滤器加到用户名密码过滤器之前
                 .addFilterBefore(jwtAuthenticationFilter,
                         UsernamePasswordAuthenticationFilter.class);
 

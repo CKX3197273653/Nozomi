@@ -39,3 +39,8 @@ logging:
   level:
     root: warn
     org.mate.mate10: INFO
+
+  management:
+    endpoint:
+      health:
+        show-details: when-authorized

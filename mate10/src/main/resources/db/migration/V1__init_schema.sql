@@ -1,24 +1,7 @@
 -- ============================================================
--- Mate10 智能质检分析平台 - 数据库初始化脚本
--- ------------------------------------------------------------
--- 使用方式（任选其一）：
---   1. 命令行: mysql -uroot -p < init.sql
---   2. MySQL 客户端: source 本文件路径
--- 说明：
---   - 幂等脚本，可重复执行（全部使用 IF NOT EXISTS）
---   - 数据库默认 root/root 与 application.yml 一致
---   - 所有表统一建在 mate10db（默认数据源）
+-- V1: 初始化业务表结构
+-- 说明：Flyway 在【目标数据库】中执行本脚本，因此不需要 CREATE DATABASE / USE
 -- ============================================================
-
--- ---------- 1. 创建数据库 ----------
-
--- 业务/质检数据库（application.yml 默认数据源）
-CREATE DATABASE IF NOT EXISTS `mate10db`
-    DEFAULT CHARACTER SET utf8mb4
-    COLLATE utf8mb4_unicode_ci;
-
--- ---------- 2. mate10db：业务表 ----------
-USE `mate10db`;
 
 -- 用户账号表
 CREATE TABLE IF NOT EXISTS `sys_user` (
@@ -27,7 +10,7 @@ CREATE TABLE IF NOT EXISTS `sys_user` (
                                           `email`         VARCHAR(200) DEFAULT NULL COMMENT '邮箱（唯一）',
                                           `password`      VARCHAR(255) NOT NULL COMMENT 'BCrypt 加密后的密码',
                                           `nickname`      VARCHAR(100) DEFAULT NULL COMMENT '昵称',
-                                          `phone`         BIGINT       DEFAULT NULL COMMENT '手机号（注意：建议后续改为 VARCHAR(20)，避免前导0丢失）',
+                                          `phone`         BIGINT       DEFAULT NULL COMMENT '手机号',
                                           `status`        INT          DEFAULT 1 COMMENT '状态：1-正常 0-禁用',
                                           `lastLoginTime` DATETIME     DEFAULT NULL COMMENT '最后登录时间',
                                           `createTime`    DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -88,7 +71,6 @@ CREATE TABLE IF NOT EXISTS `qc_production_param` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='生产参数表';
 
 -- 聊天记录表
--- 注意：ChatRecordMapper 查询不带库前缀（默认数据源），因此本表必须建在 mate10db
 CREATE TABLE IF NOT EXISTS `chat_record` (
                                              `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '记录ID',
                                              `user_id`     BIGINT       NOT NULL COMMENT '用户ID',
@@ -99,9 +81,7 @@ CREATE TABLE IF NOT EXISTS `chat_record` (
                                              KEY `idx_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='聊天记录表';
 
--- 会话表
--- 注意：ChatMapper 查询不带库前缀（默认数据源），因此本表必须建在 mate10db
--- 列名为驼峰风格，与 Chat 实体的 @TableField("userId"/"createTime"/"updateTime") 映射一致
+-- 会话表（列名驼峰，与 Chat 实体的 @TableField 映射一致）
 CREATE TABLE IF NOT EXISTS `chat` (
                                       `id`         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '会话ID',
                                       `userId`     BIGINT       DEFAULT NULL COMMENT '用户ID',
@@ -112,9 +92,3 @@ CREATE TABLE IF NOT EXISTS `chat` (
                                       KEY `idx_user_id` (`userId`) USING BTREE,
                                       KEY `idx_update_time` (`updateTime`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='聊天会话表';
-
--- ---------- 3.（可选）种子数据 ----------
--- 以下为管理员账号示例，密码需为 BCrypt 加密值。
--- 生产环境请通过注册接口创建账号，或替换占位 hash：
--- INSERT INTO mate10db.sys_user (username, email, password, nickname, status, role)
--- VALUES ('admin', 'admin@mate10.com', '$2a$10$替换为真实BCrypt哈希', '管理员', 1, 1);

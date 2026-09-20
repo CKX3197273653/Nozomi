@@ -100,7 +100,142 @@
          Ollama (localhost:11434) ◄──── embeddingModel ──► Milvus :19530
            deepseek-r1 / all-minilm                            rag_documents
 ```
+**正交维度**
 
+```
+╔═══════════════════════════════════════════════════════════════════════╗
+║                     维度划分：互不干扰，各自独立                       ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+         维度 A · 环境                            维度 B · AI 能力
+      「基础设施在哪」                          「模型跑在哪」
+
+      ┌──────────────┐                          ┌──────────────┐
+      │     dev      │  开发环境                 │    ollama    │  本地模型
+      │     prod     │  生产环境（正式）          │    cloud     │  云端 API
+      └──────────────┘                          └──────────────┘
+            │                                         │
+            │ 决定                                    │ 决定
+            ▼                                         ▼
+   ┌──────────────────────┐                 ┌──────────────────────┐
+   │  MySQL / MongoDB     │                 │  ChatModel           │
+   │  Redis / Kafka       │                 │  StreamingChatModel  │
+   │  Milvus 地址          │                │  EmbeddingModel      │
+   │  日志级别             │                 │  Milvus 集合名+维度  │
+   │  错误详情开关         │                 │                      │
+   └──────────────────────┘                 └──────────────────────┘
+```
+
+**运行组合**
+```
+╔═══════════════════════════════════════════════════════════════════════╗
+║                          4 种运行组合                                  ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+  ┌────────────────┬──────────────┬─────────────────┬────────────────┐
+  │    组合        │  基础设施    │     模型        │     场景       │
+  ├────────────────┼──────────────┼─────────────────┼────────────────┤
+  │  dev,ollama    │  本机        │  本机 Ollama    │  纯离线开发    │
+  ├────────────────┼──────────────┼─────────────────┼────────────────┤
+  │  dev,cloud  ◀──┼──────────────┼─────────────────┼────────────────┤
+  │                │  本机        │  云端 API       │  ★ 你现在在这  │
+  ├────────────────┼──────────────┼─────────────────┼────────────────┤
+  │  prod,ollama   │  生产服务器  │  服务器 Ollama  │  私有化部署    │
+  ├────────────────┼──────────────┼─────────────────┼────────────────┤
+  │  prod,cloud    │  生产服务器  │  云端 API       │  正式上线      │
+  └────────────────┴──────────────┴─────────────────┴────────────────┘
+```
+**配置加载 ( dev,cloud为例 )**
+```
+╔═══════════════════════════════════════════════════════════════════════╗
+║                   配置加载：后面的覆盖前面的                           ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+  ┌─────────────────────────────┐
+  │  application.yml            │  永远加载
+  │  ─────────────────────────  │
+  │  · spring.application.name  │
+  │  · spring.profiles.active   │
+  │  · Kafka 序列化配置         │
+  │  · MyBatis-Plus             │
+  │  · app.chat / app.rag       │
+  │  · spring.flyway            │
+  └──────────────┬──────────────┘
+                 │
+                 ▼
+  ┌─────────────────────────────┐
+  │  application-dev.yml        │  active 含 "dev"
+  │  ─────────────────────────  │
+  │  · MySQL localhost:3306     │
+  │  · root / root              │
+  │  · MongoDB / Redis / Kafka  │
+  │  · Milvus 127.0.0.1:19530   │
+  │  · DEBUG 日志               │
+  └──────────────┬──────────────┘
+                 │
+                 ▼
+  ┌─────────────────────────────┐
+  │  application-cloud.yml      │  active 含 "cloud"
+  │  ─────────────────────────  │
+  │  · DeepSeek api.deepseek.com│
+  │  · 智谱 open.bigmodel.cn    │
+  │  · model: deepseek-chat     │
+  │  · embedding-3 (2048 维)    │
+  │  · Milvus 集合              │
+  │    rag_documents_2048       │
+  └──────────────┬──────────────┘
+                 │
+                 ▼
+        ┌────────────────────┐
+        │   最终生效的配置    │
+        └────────────────────┘
+```
+**关于 @Profile决定Bean的装配**
+```
+╔═══════════════════════════════════════════════════════════════════════╗
+║              LangChain4jConfig.java —— 模型 Bean 的开关                ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+   ┌─────────────────────────┐        ┌─────────────────────────┐
+   │   @Profile("ollama")    │        │   @Profile("cloud")     │
+   │   ───────────────────   │        │   ───────────────────   │
+   │   ChatModel             │        │   ChatModel             │
+   │   StreamingChatModel    │  互斥  │   StreamingChatModel    │
+   │   EmbeddingModel        │  ◀──▶  │   EmbeddingModel        │
+   │                         │        │                         │
+   │   实现：Ollama 本地调用  │        │   实现：OpenAI 兼容 HTTP │
+   └─────────────────────────┘        └─────────────────────────┘
+                    │                            │
+                    └──────────┬─────────────────┘
+                               ▼
+              同一时刻【只有一套】Bean 存在
+                               ▼
+                  所以不会出现 Bean 冲突 
+
+        active: dev,cloud   →  装配 cloud 那一套 
+        active: dev,ollama  →  装配 ollama 那一套 
+```
+**两个维度唯一耦合点**
+```
+╔═══════════════════════════════════════════════════════════════════════╗
+║         AI profile  ↔  Milvus 集合（这是唯一必须成对变化的地方）       ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+   AI profile      embedding 模型           Milvus 集合
+   ───────────     ──────────────────       ───────────────────────
+   ollama     →    all-minilm          →    rag_documents
+                   (384 维)                 (384 维)
+
+   cloud      →    智谱 embedding-3    →    rag_documents_2048
+                   (2048 维)                (2048 维)
+
+                        ↓
+        两个集合【完全独立】，互相看不到对方的数据
+                        ↓
+        切换 AI profile 后，旧集合维度对不上
+                        ↓
+         必须在 QA 界面重新「初始化质检知识库」
+```
 **QC 智能分析流水线**
 
 ```
@@ -111,6 +246,27 @@
                                                           │
                                                           ▼
                       更新报告 total_defects/severity + 状态 COMPLETED/FAILED
+```
+**环境维度的实际差异 dev or prod**
+```
+╔═══════════════════════════════════════════════════════════════════════╗
+║                          dev  or  prod                                 ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+   项目              dev                      prod
+   ──────────────    ───────────────────      ──────────────────────────
+   数据库            localhost:3306           ${MYSQL_URL}
+                     写死 root/root           环境变量注入
+   
+   Redis 连接池      max-active 50            max-active 200
+   
+   日志              org.mate.mate10: DEBUG   root: warn
+   
+   错误详情          app.error.detail: true   app.error.detail: false
+   
+   Tesseract         有默认值                 无默认值 → 缺失即启动失败          url: ${MYSQL_URL} 刻意不给默认库 
+                                                                                      ↓
+   密钥              可写死                   全部环境变量                       配置缺失 → 启动直接失败  ,这个好过连接错误的库
 ```
 
 ---
@@ -242,96 +398,96 @@ java -jar target/mate10-0.0.1-SNAPSHOT.jar
 
 ### 认证 / 用户管理 `/blocker/user`
 
-| 方法 | 路径 | 参数 | 说明 |
-| --- | --- | --- | --- |
-| POST | `/blocker/user/login` | `username`,`password` | 登录，返回 `token` + `user` |
-| POST | `/blocker/user/add` | body `SysUser`，`role=1` | 新增用户（管理员） |
-| PUT | `/blocker/user/update` | body `SysUser`，`role=1` | 更新用户 |
-| GET | `/blocker/user/check-username` | `username` | 用户名查重 |
-| PUT | `/blocker/user/update-username` | `userId`,`username` | 改用户名 |
-| PUT | `/blocker/user/updatePassword` | `userId`,`oldPassword`,`newPassword` | 修改密码 |
-| PUT | `/blocker/user/disable/{userId}` | `role=1` | 禁用用户 |
-| DELETE | `/blocker/user/delete/{userId}` | `role=1` | 删除用户 |
-| GET | `/blocker/user/get/{userId}` | - | 查询用户 |
+| 方法     | 路径                               | 参数                                   | 说明                     |
+|--------|----------------------------------|--------------------------------------|------------------------|
+| POST   | `/blocker/user/login`            | `username`,`password`                | 登录，返回 `token` + `user` |
+| POST   | `/blocker/user/add`              | body `SysUser`，`role=1`              | 新增用户（管理员）              |
+| PUT    | `/blocker/user/update`           | body `SysUser`，`role=1`              | 更新用户                   |
+| GET    | `/blocker/user/check-username`   | `username`                           | 用户名查重                  |
+| PUT    | `/blocker/user/update-username`  | `userId`,`username`                  | 改用户名                   |
+| PUT    | `/blocker/user/updatePassword`   | `userId`,`oldPassword`,`newPassword` | 修改密码                   |
+| PUT    | `/blocker/user/disable/{userId}` | `role=1`                             | 禁用用户                   |
+| DELETE | `/blocker/user/delete/{userId}`  | `role=1`                             | 删除用户                   |
+| GET    | `/blocker/user/get/{userId}`     | -                                    | 查询用户                   |
 
 ### AI 聊天
 
-| 方法 | 路径 | 参数 | 说明 |
-| --- | --- | --- | --- |
-| POST | `/ai/chat` | body `Chat{userId,title}` | 创建会话 |
-| POST | `/ai/chatRecord` | body `ChatRequest{message,userId,chatId}` | 发送消息并返回 AI 回答（存 MongoDB + Kafka 落库） |
-| GET | `/api/chat/messages/{chatId}` | - | 按会话查消息 |
-| GET | `/api/chat/user/{userId}/messages` | - | 按用户查消息 |
-| GET | `/api/chat/messages/{chatId}/{role}` | `role=User/ai` | 按会话+角色查消息 |
+| 方法   | 路径                                   | 参数                                        | 说明                                  |
+|------|--------------------------------------|-------------------------------------------|-------------------------------------|
+| POST | `/ai/chat`                           | body `Chat{userId,title}`                 | 创建会话                                |
+| POST | `/ai/chatRecord`                     | body `ChatRequest{message,userId,chatId}` | 发送消息并返回 AI 回答（存 MongoDB + Kafka 落库） |
+| GET  | `/api/chat/messages/{chatId}`        | -                                         | 按会话查消息                              |
+| GET  | `/api/chat/user/{userId}/messages`   | -                                         | 按用户查消息                              |
+| GET  | `/api/chat/messages/{chatId}/{role}` | `role=User/ai`                            | 按会话+角色查消息                           |
 
 ### RAG 知识库 `/rag`
 
-| 方法 | 路径 | 参数 | 说明 |
-| --- | --- | --- | --- |
-| POST | `/rag/add-text` | body 纯文本 | 将文本加入知识库 |
-| POST | `/rag/upload` | `file`（multipart，按文本解析） | 上传文件入知识库 |
-| POST | `/rag/ask` | body 问题文本 | 通用 RAG 问答 |
-| POST | `/rag/qc-ask` | body 问题文本 | 质检助手预设上下文问答 |
-| POST | `/rag/init-qc-knowledge` | - | 写入内置质检标准知识库 |
-| DELETE | `/rag/clear` | - | 清空知识库 |
+| 方法     | 路径                       | 参数                      | 说明          |
+|--------|--------------------------|-------------------------|-------------|
+| POST   | `/rag/add-text`          | body 纯文本                | 将文本加入知识库    |
+| POST   | `/rag/upload`            | `file`（multipart，按文本解析） | 上传文件入知识库    |
+| POST   | `/rag/ask`               | body 问题文本               | 通用 RAG 问答   |
+| POST   | `/rag/qc-ask`            | body 问题文本               | 质检助手预设上下文问答 |
+| POST   | `/rag/init-qc-knowledge` | -                       | 写入内置质检标准知识库 |
+| DELETE | `/rag/clear`             | -                       | 清空知识库       |
 
 ### 质检报告 `/api/qc/report`
 
-| 方法 | 路径 | 参数 | 说明 |
-| --- | --- | --- | --- |
-| POST | `/api/qc/report/create` | body `QcReport` | 手工创建报告 |
-| POST | `/api/qc/report/upload` | `file` + `reportNo/productName/productBatch/productionLine/inspector`，可选 `prompt` | 上传文件并触发异步 AI 分析 |
-| GET | `/api/qc/report/page` | `pageNum`,`pageSize`,`productName?`,`status?` | 分页查询 |
-| GET | `/api/qc/report/{id}` | - | 报告详情 |
-| PUT | `/api/qc/report/{id}/status` | `status` | 更新状态 |
-| DELETE | `/api/qc/report/{id}` | - | 删除报告 |
-| GET | `/api/qc/report/stats/trend` | `days=7` | 按天缺陷趋势 |
-| GET | `/api/qc/report/stats/production-line` | - | 按生产线统计 |
-| GET | `/api/qc/report/stats/product-batch` | `limit=10` | 按批次统计 |
-| GET | `/api/qc/report/{id}/root-cause` | - | AI 根因分析（需缺陷+生产参数） |
+| 方法     | 路径                                     | 参数                                                                                | 说明                |
+|--------|----------------------------------------|-----------------------------------------------------------------------------------|-------------------|
+| POST   | `/api/qc/report/create`                | body `QcReport`                                                                   | 手工创建报告            |
+| POST   | `/api/qc/report/upload`                | `file` + `reportNo/productName/productBatch/productionLine/inspector`，可选 `prompt` | 上传文件并触发异步 AI 分析   |
+| GET    | `/api/qc/report/page`                  | `pageNum`,`pageSize`,`productName?`,`status?`                                     | 分页查询              |
+| GET    | `/api/qc/report/{id}`                  | -                                                                                 | 报告详情              |
+| PUT    | `/api/qc/report/{id}/status`           | `status`                                                                          | 更新状态              |
+| DELETE | `/api/qc/report/{id}`                  | -                                                                                 | 删除报告              |
+| GET    | `/api/qc/report/stats/trend`           | `days=7`                                                                          | 按天缺陷趋势            |
+| GET    | `/api/qc/report/stats/production-line` | -                                                                                 | 按生产线统计            |
+| GET    | `/api/qc/report/stats/product-batch`   | `limit=10`                                                                        | 按批次统计             |
+| GET    | `/api/qc/report/{id}/root-cause`       | -                                                                                 | AI 根因分析（需缺陷+生产参数） |
 
 ### 缺陷 `/api/qc/defect`
 
-| 方法 | 路径 | 参数 | 说明 |
-| --- | --- | --- | --- |
-| POST | `/api/qc/defect/create` | body `QcDefect` | 新增缺陷 |
-| PUT | `/api/qc/defect/update` | body `QcDefect` | 更新缺陷 |
-| DELETE | `/api/qc/defect/{id}` | - | 删除缺陷 |
-| GET | `/api/qc/defect/report/{reportId}` | - | 按报告查缺陷 |
-| GET | `/api/qc/defect/stats/type` | - | 缺陷类型统计 |
-| GET | `/api/qc/defect/stats/severity` | - | 严重程度统计 |
-| PUT | `/api/qc/defect/{id}/confirm` | - | 人工确认缺陷 |
-| GET | `/api/qc/defect/3d/{reportId}` | - | ECharts/Three.js 3D 缺陷数据 |
+| 方法     | 路径                                 | 参数              | 说明                       |
+|--------|------------------------------------|-----------------|--------------------------|
+| POST   | `/api/qc/defect/create`            | body `QcDefect` | 新增缺陷                     |
+| PUT    | `/api/qc/defect/update`            | body `QcDefect` | 更新缺陷                     |
+| DELETE | `/api/qc/defect/{id}`              | -               | 删除缺陷                     |
+| GET    | `/api/qc/defect/report/{reportId}` | -               | 按报告查缺陷                   |
+| GET    | `/api/qc/defect/stats/type`        | -               | 缺陷类型统计                   |
+| GET    | `/api/qc/defect/stats/severity`    | -               | 严重程度统计                   |
+| PUT    | `/api/qc/defect/{id}/confirm`      | -               | 人工确认缺陷                   |
+| GET    | `/api/qc/defect/3d/{reportId}`     | -               | ECharts/Three.js 3D 缺陷数据 |
 
 ### 生产参数 `/api/qc/param`
 
-| 方法 | 路径 | 参数 | 说明 |
-| --- | --- | --- | --- |
-| POST | `/api/qc/param/create` | body `QcProductionParam` | 新增生产参数 |
-| PUT | `/api/qc/param/update` | body `QcProductionParam` | 更新生产参数 |
-| GET | `/api/qc/param/report/{reportId}` | - | 按报告查生产参数 |
+| 方法   | 路径                                | 参数                       | 说明       |
+|------|-----------------------------------|--------------------------|----------|
+| POST | `/api/qc/param/create`            | body `QcProductionParam` | 新增生产参数   |
+| PUT  | `/api/qc/param/update`            | body `QcProductionParam` | 更新生产参数   |
+| GET  | `/api/qc/param/report/{reportId}` | -                        | 按报告查生产参数 |
 
 ### Milvus 通用向量 `/api/vector`
 
-| 方法 | 路径 | 参数 | 说明 |
-| --- | --- | --- | --- |
-| POST | `/api/vector/collection` | `collName`,`dim` | 创建集合 + 索引 + 加载 |
-| POST | `/api/vector` | `collName`，body 向量数组 | 插入向量 |
-| POST | `/api/vector/search` | `collName`,`vector`,`topK=5` | 相似度检索（返回 ID） |
-| POST | `/api/vector/query` | `collName`，body ID 数组 | 按 ID 查询向量 |
-| PUT | `/api/vector/update` | `collName`,`id`，body 向量 | 更新（先删后插） |
-| DELETE | `/api/vector/delete` | `collName`，body ID 数组 | 删除向量 |
-| DELETE | `/api/vector/collection` | `collName` | 删除整个集合 |
-| GET | `/api/vector/collection/exists` | `collName` | 判断集合是否存在 |
+| 方法     | 路径                              | 参数                           | 说明             |
+|--------|---------------------------------|------------------------------|----------------|
+| POST   | `/api/vector/collection`        | `collName`,`dim`             | 创建集合 + 索引 + 加载 |
+| POST   | `/api/vector`                   | `collName`，body 向量数组         | 插入向量           |
+| POST   | `/api/vector/search`            | `collName`,`vector`,`topK=5` | 相似度检索（返回 ID）   |
+| POST   | `/api/vector/query`             | `collName`，body ID 数组        | 按 ID 查询向量      |
+| PUT    | `/api/vector/update`            | `collName`,`id`，body 向量      | 更新（先删后插）       |
+| DELETE | `/api/vector/delete`            | `collName`，body ID 数组        | 删除向量           |
+| DELETE | `/api/vector/collection`        | `collName`                   | 删除整个集合         |
+| GET    | `/api/vector/collection/exists` | `collName`                   | 判断集合是否存在       |
 
 ---
 
 ## Kafka 主题
 
-| 主题 | 生产者 | 消费者 | 用途 |
-| --- | --- | --- | --- |
-| `chat-topic` | `/ai/chatRecord` | `ChatRecordServiceImpl` | 聊天记录异步落库 + AI 关键词 |
-| `qc-report-topic` | `/api/qc/report/upload` | `QcReportServiceImpl` | 质检报告异步 AI 分析 |
+| 主题                | 生产者                     | 消费者                     | 用途                |
+|-------------------|-------------------------|-------------------------|-------------------|
+| `chat-topic`      | `/ai/chatRecord`        | `ChatRecordServiceImpl` | 聊天记录异步落库 + AI 关键词 |
+| `qc-report-topic` | `/api/qc/report/upload` | `QcReportServiceImpl`   | 质检报告异步 AI 分析      |
 
 ---
 
@@ -427,4 +583,6 @@ tesseract:               # 图片 OCR（需本机安装 Tesseract + 中文语言
 - **安全管理**：`SecurityConfig` 当前对接口匿名放行（`permitAll`），JWT 由应用层自行校验/签发，未配置全局 Filter 拦截，正式环境需收紧。
 - **数据库名不一致**：`application.yml` 默认库为 `mate10db`，但 `ChatMapper.selectByUserId` 硬编码了 `mate10sql.chat` 跨库查询，切换库名时需同步调整。
 - **JWT 密钥**：`JwtUtil` 中的 SECRET_KEY 为内置常量，生产环境应改为外部配置注入。
+- **读取spring.profiles.active优先级**:`命令行参数 <- JVW系统属性 <- 操作系统环境变量 <- application.yml`
 - 质检报告上传文件保存在运行目录 `uploads/qc/`（相对路径），部署时注意目录与磁盘清理策略。
+
