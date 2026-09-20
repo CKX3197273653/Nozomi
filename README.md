@@ -1,4 +1,3 @@
-  ![CI](https://github.com/CKX3197273653/Nozomi/actions/workflows/ci.yml/badge.svg)
 # Mate10 · 智能质检分析平台
 
 ![CI](https://github.com/CKX3197273653/Nozomi/actions/workflows/ci.yml/badge.svg)
