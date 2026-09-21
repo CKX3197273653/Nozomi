@@ -5,9 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
-import dev.langchain4j.model.ollama.OllamaChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.mate.mate10.common.EvictQcCache;
 import org.mate.mate10.config.ChatModelFactory;
@@ -25,7 +23,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 @Slf4j
@@ -227,7 +224,7 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
         return qcReportMapper.deleteById(id)>0;
     }
     @Override
-    @Cacheable(cacheNames="qcDetail", key="'report:' + #id")
+    @Cacheable(cacheNames="qcDetail", key="'report:' + #id", unless = "#result == null ")
     public QcReport getById(Long id){
         return qcReportMapper.selectById(id);
     }
@@ -523,5 +520,13 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
         }
 
         return result;
+    }
+    @Cacheable(cacheNames = "qcDetail", key = "'reportNo:' + #reportNo", unless = "#result == null")
+    @Override
+    public QcReport getByReportNo(String reportNo) {
+        if (!StringUtils.hasText(reportNo)) {
+            return null;
+        }
+        return qcReportMapper.selectByReportNo(reportNo.trim());
     }
 }

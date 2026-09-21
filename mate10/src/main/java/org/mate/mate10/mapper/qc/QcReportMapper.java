@@ -49,4 +49,7 @@ public interface QcReportMapper extends BaseMapper<QcReport> {
             "ORDER BY count DESC " +
             "LIMIT #{limit}")
     List<Map<String, Object>> countByProductBatch(@Param("limit") int limit);
+
+    @Select("SELECT * FROM qc_report WHERE report_no = #{reportNo} LIMIT 1")
+    QcReport selectByReportNo(@Param("reportNo") String reportNo);
 }

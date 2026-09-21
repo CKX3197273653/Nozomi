@@ -13,4 +13,6 @@ public class OllamaProperties {
 
     private String embeddingModel = "all-minilm:latest";
 
+    private String agentModel = "llama3.1:latest";
+
 }

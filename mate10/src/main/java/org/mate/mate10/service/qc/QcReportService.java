@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.mate.mate10.entity.qc.QcDefect;
 import org.mate.mate10.entity.qc.QcProductionParam;
 import org.mate.mate10.entity.qc.QcReport;
+import org.springframework.cache.annotation.Cacheable;
 
 import java.util.List;
 import java.util.Map;
@@ -49,4 +50,6 @@ public interface QcReportService {
     List<Map<String, Object>> countByProductBatch(int limit);
     //根因分析
     Map<String, Object> analyzeRootCause(Long reportId);
+
+    QcReport getByReportNo(String reportNo);
 }

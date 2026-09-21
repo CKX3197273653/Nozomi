@@ -281,6 +281,59 @@ docker push --platform linux/amd64 <image>
 
 ---
 
+### Redis：清缓存用的是 `UNLINK` 而不是 `DEL`
+
+用 `MONITOR` 观察 Spring 清缓存，看到的是：
+
+```
+"UNLINK" "qcStats::batch:10" "qcStats::severity" "qcStats::defectType" ...
+```
+
+**为什么不是 `DEL`**：
+
+| 命令 | 行为 | 影响 |
+|---|---|---|
+| `DEL` | **同步**删除，立即释放内存 | key 很大时（如几百 MB 的 List）会**阻塞 Redis 主线程** ⚠️ |
+| `UNLINK` | 只把 key 从键空间摘除，**内存回收交给后台线程** | 不阻塞主线程 ✅ |
+
+Redis 是单线程处理命令的，一次慢 `DEL` 会让所有其他请求排队。
+
+> Spring Data Redis 默认用 `UNLINK`，前提是 Redis 4.0+（本项目开发环境 5.0.14、生产 7.x 都满足）。
+
+### Redis：清缓存默认用 `KEYS` 扫描，数据量大时会阻塞
+
+`RedisCache.clear()` 需要先找出该缓存名下的所有 key，Spring 默认用 `KEYS`：
+
+```
+"KEYS" "qcDetail::*"          ← O(N) 全库扫描！
+"UNLINK" "qcDetail::defects:15" "qcDetail::report:15"
+```
+
+**`KEYS` 是 O(N) 遍历，且会阻塞 Redis** ⚠️ —— key 上万时会明显卡顿。
+
+**优化：改用 `SCAN`（游标分批遍历，不阻塞）**
+
+```java
+import org.springframework.data.redis.cache.BatchStrategies;
+import org.springframework.data.redis.cache.RedisCacheWriter;
+
+RedisCacheWriter cacheWriter = RedisCacheWriter.nonLockingRedisCacheWriter(
+        connectionFactory,
+        BatchStrategies.scan(1000)      // 每批 1000 个 key
+);
+
+return RedisCacheManager.builder(cacheWriter)   // 用带 writer 的重载
+        .cacheDefaults(config)
+        .withInitialCacheConfigurations(initialCaches)
+        .transactionAware()
+        .build();
+```
+
+> 本项目当前 key 只有个位数，**暂时不需要改** ✅
+> 数据量上来后（key 上万）再切 `SCAN` 更稳妥。
+
+---
+
 ## 监控（Prometheus + Grafana）
 
 ### 指标链路
@@ -333,6 +386,87 @@ docker compose exec prometheus \
 | 抓取 401 | `SecurityConfig` 未放行 `/actuator/prometheus` |
 | 抓取 404 | `management.endpoints.web.exposure.include` 未包含 `prometheus` |
 | 抓取连接失败 | 目标写成了 `localhost:8080` —— **容器里的 localhost 是容器自己**，必须用 `backend:8080` |
+
+---
+
+## Redis 缓存
+
+### 缓存设计
+
+| 缓存名 | 内容 | TTL |
+|---|---|---|
+| `qcStats` | 统计聚合（趋势 / 生产线 / 产品批次 / 缺陷类型 / 严重程度） | **5 分钟** |
+| `qcDetail` | 明细（报告详情 / 缺陷列表 / 3D 数据 / 生产参数） | **30 分钟** |
+
+- 读方法用 `@Cacheable`，写方法统一用组合注解 **`@EvictQcCache`**
+  （等价于 `@CacheEvict(cacheNames = {"qcStats", "qcDetail"}, allEntries = true)`）
+- 失效采用**粗粒度**：QC 数据写入低频、统计查询高频，「写一次清一次」简单且不会漏清
+- 缓存操作由 `RedisConfig` 的 `transactionAware()` 保证在**事务提交后**执行，避免脏数据回写
+
+### ⚠️ 生产必配：`maxmemory`
+
+**默认配置下 Redis 无内存上限，且内存满时直接报错**：
+
+```
+maxmemory_human:0B             ← 0 = 无上限，会一直吃内存直到拖垮宿主机 ☠️
+maxmemory_policy:noeviction    ← 内存满时【写操作直接失败】，不淘汰旧 key ❌
+```
+
+**正确配置**（`docker-compose.yml` 的 redis `command` 里加参数）：
+
+```yaml
+redis:
+  command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes \
+           --maxmemory 512mb --maxmemory-policy allkeys-lru
+```
+
+**为什么缓存场景用 `allkeys-lru`**：
+
+```
+缓存数据【都可以重建】（重新查数据库即可）
+        ↓
+内存满时淘汰"最久未使用"的 key，比直接报错合理得多 ✅
+        ↓
+LRU = Least Recently Used
+```
+
+### 验证方法
+
+**① 看缓存内容与 TTL**
+
+```bash
+# 本机 redis-cli 位置（Windows）：I:\Redis-x64-5\Redis-x64-5.0.14.1\redis-cli.exe
+redis-cli KEYS "qcStats*"
+redis-cli TTL "qcStats::trend:7"        # 期望 ≤ 300（5 分钟）
+redis-cli GET "qcStats::severity"       # JSON 明文，可直接阅读
+```
+
+> 选 `GenericJacksonJsonRedisSerializer` 而非 JDK 序列化，正是为了让缓存内容**可读可排查** ✅
+
+**② 实时观察缓存行为（最直观）**
+
+```bash
+redis-cli MONITOR
+```
+
+然后操作页面，观察输出：
+
+| 看到什么 | 含义 |
+|---|---|
+| 只有 `GET` | ✅ 命中缓存，**没有查数据库** |
+| `GET` 后跟 `SET` | ⚠️ 未命中，查完库写入缓存 |
+| `UNLINK` / `DEL` | 🎯 写操作触发了缓存失效 |
+
+```
+# 命中示例
+"GET" "qcStats::line"
+
+# 失效示例
+"KEYS"   "qcStats::*"
+"UNLINK" "qcStats::batch:10" "qcStats::severity" ...
+```
+
+> ⚠️ `MONITOR` 会输出**所有**命令，有性能开销，**仅用于开发/排查**，不要在生产长期开启。
 
 ---
 

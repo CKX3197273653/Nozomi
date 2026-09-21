@@ -1,6 +1,7 @@
 ollama:
   base-url: http://localhost:11434
   default-model: deepseek-r1:latest
+  agent-model: llama3.1:latest
   embedding-model: all-minilm:latest
 
 milvus:

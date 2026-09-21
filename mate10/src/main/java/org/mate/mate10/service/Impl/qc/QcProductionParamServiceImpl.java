@@ -27,7 +27,7 @@ public class QcProductionParamServiceImpl implements QcProductionParamService {
     }
 
     @Override
-    @Cacheable(cacheNames="qcDetail", key="'param:' + #reportId")
+    @Cacheable(cacheNames="qcDetail", key="'param:' + #reportId", unless = "#result == null ")
     public QcProductionParam getByReportId(Long reportId) {
         return qcProductionParamMapper.selectByReportId(reportId);
     }
