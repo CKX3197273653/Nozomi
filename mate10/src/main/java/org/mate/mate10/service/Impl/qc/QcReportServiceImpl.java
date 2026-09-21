@@ -9,6 +9,7 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.ollama.OllamaChatModel;
 import lombok.extern.slf4j.Slf4j;
+import org.mate.mate10.common.EvictQcCache;
 import org.mate.mate10.config.ChatModelFactory;
 import org.mate.mate10.entity.qc.QcDefect;
 import org.mate.mate10.entity.qc.QcProductionParam;
@@ -19,6 +20,7 @@ import org.mate.mate10.service.qc.QcDefectService;
 import org.mate.mate10.service.qc.QcProductionParamService;
 import org.mate.mate10.service.qc.QcReportService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -46,6 +48,7 @@ public class QcReportServiceImpl implements QcReportService {
 
     @Override
     @Transactional  // 事务：三个操作要么都成功，要么都失败
+    @EvictQcCache
     public Long createFullReport(QcReport report, List<QcDefect> defects, QcProductionParam param) {
         //插入报告，拿到 reportId
         Long reportId = createReport(report);
@@ -208,19 +211,23 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
 
     //增删改查
     @Override
+    @EvictQcCache
     public Long createReport(QcReport report){
         qcReportMapper.insert(report);
         return report.getId();
     }
     @Override
+    @EvictQcCache
     public boolean updateReport(QcReport report){
         return qcReportMapper.updateById(report)>0;
     }
     @Override
+    @EvictQcCache
     public boolean deleteReport(Long id){
         return qcReportMapper.deleteById(id)>0;
     }
     @Override
+    @Cacheable(cacheNames="qcDetail", key="'report:' + #id")
     public QcReport getById(Long id){
         return qcReportMapper.selectById(id);
     }
@@ -257,6 +264,7 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
 
 
     @Override
+    @EvictQcCache
     public boolean updateStatus(Long id, String status) {
         QcReport report = new QcReport();
         report.setId(id);
@@ -265,6 +273,7 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
     }
 
     @Override
+    @EvictQcCache
     public boolean updateDefectCount(Long id, int defectCount, String severityLevel) {
         QcReport report = new QcReport();
         report.setId(id);
@@ -272,7 +281,7 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
         report.setSeverityLevel(severityLevel);
         return qcReportMapper.updateById(report) > 0;
     }
-    //发送Kafka消息
+    //发送Kafka消息（只发消息不写库，因此无需失效缓存）
     @Override
     public void sendAnalyzeTask(Long reportId, String fileUrl, String fileType,String prompt) {
         try{
@@ -295,6 +304,7 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
     /* 告诉spring Kafka监听qc-report-topic主题,有消息自动调用 */
     @org.springframework.kafka.annotation.KafkaListener(topics = "qc-report-topic")
     /*参数是字符串不是Map,这是Kafka原始格式*/
+    @EvictQcCache
     public void consumeAnalyzeTask(String messageJson){
         try{
             //解析JSON字符串为Map
@@ -317,6 +327,7 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
 
     //执行AI分析
     @Override
+    @EvictQcCache
     public void processAnalyzeTask(Long reportId, String fileUrl, String fileType,String prompt) {
       try{
           log.info("业务处理-分析报告"+reportId);
@@ -343,8 +354,8 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
           throw new RuntimeException("报告分析失败",e);
       }
     }
-
     @Override
+    @Cacheable(cacheNames="qcStats", key="'trend:' + (#days <= 0 ? 7 : #days)")
     public List<Map<String, Object>> countByTimeTrend(int days) {
         if (days <= 0) {
             days = 7;  // 默认 7 天
@@ -353,12 +364,13 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
     }
 
     @Override
+    @Cacheable(cacheNames="qcStats", key="'line'")
     public List<Map<String, Object>> countByProductionLine() {
         return qcReportMapper.countByProductionLine();
     }
 
-
     @Override
+    @Cacheable(cacheNames="qcStats", key="'batch:' + (#limit <= 0 ? 10 : #limit)")
     public List<Map<String, Object>> countByProductBatch(int limit) {
         if (limit <= 0) {
             limit = 10;  // 默认显示前 10 个批次

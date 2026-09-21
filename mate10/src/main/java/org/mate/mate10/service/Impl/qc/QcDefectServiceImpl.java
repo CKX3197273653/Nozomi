@@ -1,9 +1,11 @@
 package org.mate.mate10.service.Impl.qc;
 
+import org.mate.mate10.common.EvictQcCache;
 import org.mate.mate10.entity.qc.QcDefect;
 import org.mate.mate10.mapper.qc.QcDefectMapper;
 import org.mate.mate10.service.qc.QcDefectService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -15,11 +17,13 @@ public class QcDefectServiceImpl implements QcDefectService {
     private QcDefectMapper qcDefectMapper;
 
     @Override
+    @EvictQcCache
     public Long addDefect(QcDefect defect) {
         qcDefectMapper.insert(defect);
         return defect.getId();
     }
     @Override
+    @EvictQcCache
     public int batchAddDefects(List<QcDefect> defects) {
         if (defects == null || defects.isEmpty()){
             return 0;
@@ -28,30 +32,37 @@ public class QcDefectServiceImpl implements QcDefectService {
     }
 
     @Override
+    @EvictQcCache
     public boolean updateDefect(QcDefect defect) {
         return qcDefectMapper.updateById(defect) > 0;
     }
 
     @Override
+    @EvictQcCache
     public boolean deleteDefect(Long id) {
         return qcDefectMapper.deleteById(id) > 0;
     }
+
     @Override
+    @Cacheable(cacheNames="qcDetail", key="'defects:' + #reportId")
     public List<QcDefect> getByReportId(Long reportId) {
         return qcDefectMapper.selectByReportId(reportId);
     }
 
     @Override
+    @Cacheable(cacheNames="qcStats",  key="'defectType'")
     public List<Map<String, Object>> countByDefectType() {
         return qcDefectMapper.countByDefectType();
     }
 
     @Override
+    @Cacheable(cacheNames="qcStats",  key="'severity'")
     public List<Map<String, Object>> countBySeverity() {
         return qcDefectMapper.countBySeverity();
     }
 
     @Override
+    @EvictQcCache
     public boolean confirmDefect(Long id) {
         QcDefect defect = new QcDefect();
         defect.setId(id);
@@ -60,6 +71,7 @@ public class QcDefectServiceImpl implements QcDefectService {
     }
 
     @Override
+    @Cacheable(cacheNames="qcDetail", key="'3d:' + #reportId")
     public Map<String, Object> getDefects3DForECharts(Long reportId) {
         //  查询缺陷
         List<QcDefect> defects = qcDefectMapper.selectByReportId(reportId);

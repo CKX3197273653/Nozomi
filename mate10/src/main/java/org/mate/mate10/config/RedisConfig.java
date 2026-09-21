@@ -12,6 +12,7 @@ import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 import tools.jackson.databind.ObjectMapper;
 import java.time.Duration;
+import java.util.Map;
 
 @Configuration
 @EnableCaching
@@ -57,9 +58,15 @@ public class RedisConfig {
                 .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(serializer))
                 .disableCachingNullValues();
 
+        Map<String,RedisCacheConfiguration> initialCaches = Map.of(
+                "qcStats",  config.entryTtl(Duration.ofMinutes(5)),
+                "qcDetail", config.entryTtl(Duration.ofMinutes(30))
+        );
         return RedisCacheManager.builder(connectionFactory)
                 .cacheDefaults(config)
+                .withInitialCacheConfigurations(initialCaches)
                 .transactionAware()
                 .build();
+
     }
 }
