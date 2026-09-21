@@ -73,6 +73,8 @@
 **存储**：MySQL 8.0 · MongoDB · Redis · Milvus 2.6
 **中间件**：Kafka 4.1（KRaft）
 **AI**：DeepSeek API · 智谱 embedding-3 · Ollama（本地）
+**数据迁移**：Flyway
+**监控**：Spring Boot Actuator · Micrometer · Prometheus · Grafana
 **运维**：Docker 多阶段构建 · docker-compose · Nginx · GitHub Actions
 
 ---
@@ -84,8 +86,10 @@
 | **RAG 检索优化** | 通过分块策略调优，检索命中率 **86.7% → 96.7%**（附完整实验记录） |
 | **流式输出** | SSE + 独立线程池 + `try/finally` 保证 `done` 事件；前端用 `fetch` + `ReadableStream` 绕过 EventSource 的鉴权限制 |
 | **安全加固** | 方法级权限（`@PreAuthorize`）替代前端传参判断；JWT 密钥强度启动校验；密码字段 `WRITE_ONLY` 防泄露 |
-| **配置外部化** | 4 套 Profile（dev/prod/cloud/ollama）；生产配置**刻意无默认值**，缺失即 fail-fast |
+| **配置外部化** | 双维度 Profile（环境 `dev/prod` × AI `ollama/cloud`，共 4 种组合）；生产配置**刻意无默认值**，缺失即 fail-fast |
 | **测试与 CI** | 13 个单元测试（覆盖上下文组装、JWT 安全不变量、登录分支）；GitHub Actions 自动验证 |
+| **数据库迁移** | Flyway 版本化管理表结构；已有库自动 baseline，避免重复建表与手工 SQL 漂移 |
+| **可观测性** | Actuator + Micrometer 导出 Prometheus 指标；只放行 `health`/`prometheus`，其余端点保持认证 |
 | **容器化** | 多阶段构建 + 层缓存优化（先 COPY pom.xml）；前后端镜像均 < 300MB |
 
 ---
@@ -112,7 +116,8 @@ npm install && npm run dev   # http://localhost:5173
 
 ### 方式二：容器化部署
 
-见 **[deploy/README.md](deploy/README.md)** —— 包含完整的 9 服务编排方案、环境变量清单与踩坑记录。
+见 **[deploy/README.md](deploy/README.md)** —— 包含完整的 **11 服务**编排方案
+（含 Prometheus + Grafana 监控）、环境变量清单与踩坑记录。
 
 ```bash
 cd deploy
@@ -148,6 +153,16 @@ Nginx 默认缓冲响应，流式 token 会被攒到最后一次性返回。
 </details>
 
 <details>
+<summary><b>Spring Boot 4.0：加了依赖却「什么都不发生」</b></summary>
+
+Spring Boot 4.0 把自动配置**拆成了独立模块**。只加第三方库（如 `flyway-core`）
+不会引入 Spring Boot 的集成层（`spring-boot-flyway`），于是**自动配置完全不生效** ——
+没有日志、没有报错、表也没建，但 IDE 会提示「无法解析 `spring.flyway.*` 属性」。
+**解法**：用 `spring-boot-starter-flyway` 替代裸 `flyway-core`（`flyway-mysql` 仍需单独加）。
+**教训**：SB 4.0 是「库 + 集成层」两件套；**IDE 的属性解析警告通常是真的**，别急着当成缓存问题。
+</details>
+
+<details>
 <summary><b>Docker 镜像推送 SWR 报 manifest 解析失败</b></summary>
 
 Docker 23+ 的 BuildKit 默认给镜像附加 provenance/SBOM 证明，镜像变成多清单索引，部分 registry 无法解析。
@@ -170,8 +185,8 @@ Mate10/
 ├── mate10/                    # 后端（Spring Boot）
 │   ├── src/main/java/         # 分层：controller / service / mapper / entity / config
 │   ├── src/main/resources/
-│   │   ├── application*.yml   # 多环境配置
-│   │   └── sql/init.sql       # 建库建表脚本
+│   │   ├── application*.yml   # 多环境配置（dev/prod × ollama/cloud）
+│   │   └── db/migration/      # Flyway 迁移脚本（V1__init_schema.sql …）
 │   ├── src/test/java/         # 单元测试
 │   └── Dockerfile             # 多阶段构建
 ├── mate10-V/                  # 前端（Vue 3 + Vite）
@@ -179,8 +194,11 @@ Mate10/
 │   ├── nginx.conf             # 生产环境反代配置
 │   └── Dockerfile             # 多阶段：node 构建 → nginx 托管
 ├── deploy/                    # 容器编排方案
-│   ├── docker-compose.yml
+│   ├── docker-compose.yml     # 11 服务编排
+│   ├── prometheus.yml         # Prometheus 抓取配置
 │   ├── .env.example
-│   └── README.md
+│   └── README.md              # 部署手册 + 踩坑记录
+├── docs/experiments/          # 实验记录（RAG 分块策略调优）
+├── AGENTS.md                  # 项目约定与踩坑手册
 └── .github/workflows/ci.yml   # CI：后端测试 + 前端构建
 ```

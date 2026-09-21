@@ -13,6 +13,7 @@
 - [Kafka 主题](#kafka-主题)
 - [项目结构](#项目结构)
 - [配置说明](#配置说明)
+- [监控与可观测性](#监控与可观测性)
 - [已知事项 / Roadmap](#已知事项--roadmap)
 
 ---
@@ -62,13 +63,15 @@
 | 数据库 | MySQL | 8.0+ |
 | 数据库 | MongoDB | 4.0+ |
 | 缓存 | Redis | 6.0+ |
-| 消息队列 | Apache Kafka | 3.0+ |
+| 消息队列 | Apache Kafka | 4.1（KRaft，无 Zookeeper） |
 | AI | LangChain4j | 1.14.1 |
-| AI | Ollama（对话 + embedding） | 本地模型 |
+| AI | 对话/Embedding：Ollama（本地）或 DeepSeek + 智谱（云端） | Profile 切换 |
 | 向量库 | Milvus（SDK 2.6.18） | 2.x |
 | OCR | Tesseract（Tess4j 5.7.0） | 需本地安装 |
 | 文档解析 | PDFBox / Apache POI | - |
 | 认证 | Spring Security + JWT (jjwt) | - |
+| 数据库迁移 | Flyway | 11.14.1 |
+| 监控 | Spring Boot Actuator + Micrometer（Prometheus） | - |
 | API 文档 | SpringDoc OpenAPI | 2.8.13 |
 | 其他 | Lombok、Fastjson2、Easypoi、Jsoup、IK Analyzer | - |
 
@@ -264,9 +267,13 @@
    
    错误详情          app.error.detail: true   app.error.detail: false
    
-   Tesseract         有默认值                 无默认值 → 缺失即启动失败          url: ${MYSQL_URL} 刻意不给默认库 
-                                                                                      ↓
-   密钥              可写死                   全部环境变量                       配置缺失 → 启动直接失败  ,这个好过连接错误的库
+   Tesseract         有默认值                 无默认值 → 缺失即启动失败
+   密钥              可写死                   全部环境变量
+   
+   ⚠️ prod 刻意不给默认值：
+      url: ${MYSQL_URL}
+        ↓
+      配置缺失 → 启动直接失败（好过连到错误的库）✅
 ```
 
 ---
@@ -310,64 +317,45 @@ ollama pull deepseek-r1:latest   # 对话模型（默认）
 ollama pull all-minilm:latest    # embedding 模型（384 维，与 Milvus dimension 对应）
 ```
 
-### 3. 初始化 MySQL
+### 3. 初始化数据库
+
+**表结构由 Flyway 在应用启动时自动创建**，无需手工建表。
+
+只需先创建一个空库（Flyway 不会创建 database 本身）：
 
 ```sql
-CREATE DATABASE IF NOT EXISTS mate10db DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS mate10db
+    DEFAULT CHARACTER SET utf8mb4
+    COLLATE utf8mb4_unicode_ci;
 ```
 
-QC 模块参考建表语句（列名与 Mapper 注解 SQL 对应）：
+启动应用后 Flyway 会自动完成：
+
+1. 创建版本记录表 `flyway_schema_history`
+2. 执行 `db/migration/V1__init_schema.sql` 建表
+   （`sys_user` / `qc_report` / `qc_defect` / `qc_production_param` / `chat` / `chat_record`）
+
+**已有数据的库**：Flyway 检测到「库非空但无版本表」时，会自动 baseline（记为已迁移），
+**不会重复建表，也不会报错** ✅
+
+#### 后续如何新增数据库变更
 
 ```sql
--- 质检报告
-CREATE TABLE qc_report (
-    id             BIGINT PRIMARY KEY AUTO_INCREMENT,
-    report_no      VARCHAR(64)   NOT NULL COMMENT '报告编号',
-    product_name   VARCHAR(128)  NOT NULL COMMENT '产品名称',
-    product_batch  VARCHAR(64)   COMMENT '产品批次',
-    production_line VARCHAR(64)  COMMENT '生产线',
-    inspector      VARCHAR(64)   COMMENT '检验员',
-    inspect_time   DATETIME      COMMENT '检验时间',
-    file_url       VARCHAR(255)  COMMENT '源文件路径',
-    file_type      VARCHAR(16)   COMMENT 'PDF/IMAGE/WORD/EXCEL',
-    status         VARCHAR(16)   DEFAULT 'PENDING' COMMENT 'PENDING/PROCESSING/COMPLETED/FAILED',
-    total_defects  INT           DEFAULT 0 COMMENT '缺陷总数',
-    severity_level VARCHAR(16)   COMMENT 'NORMAL/WARNING/CRITICAL',
-    create_time    DATETIME,
-    update_time    DATETIME
-) COMMENT='质检报告';
-
--- 缺陷记录
-CREATE TABLE qc_defect (
-    id             BIGINT PRIMARY KEY AUTO_INCREMENT,
-    report_id      BIGINT    NOT NULL COMMENT '所属报告ID',
-    defect_type    VARCHAR(64)  COMMENT '缺陷类型',
-    defect_position VARCHAR(64) COMMENT '缺陷位置',
-    severity       VARCHAR(16)  COMMENT 'LOW/MEDIUM/HIGH/CRITICAL',
-    description    VARCHAR(512) COMMENT '缺陷描述',
-    confidence     DECIMAL(5,2) COMMENT '置信度0-100',
-    is_confirmed   TINYINT DEFAULT 0 COMMENT '是否人工确认',
-    create_time    DATETIME,
-    INDEX idx_report (report_id)
-) COMMENT='质检缺陷';
-
--- 生产参数
-CREATE TABLE qc_production_param (
-    id          BIGINT PRIMARY KEY AUTO_INCREMENT,
-    report_id   BIGINT   NOT NULL COMMENT '所属报告ID',
-    temperature DECIMAL(8,2) COMMENT '温度°C',
-    pressure    DECIMAL(8,2) COMMENT '压力MPa',
-    humidity    DECIMAL(8,2) COMMENT '湿度%',
-    speed       DECIMAL(8,2) COMMENT '速度rpm',
-    operator    VARCHAR(64)  COMMENT '操作员',
-    remark      VARCHAR(255) COMMENT '备注',
-    create_time DATETIME,
-    INDEX idx_report (report_id)
-) COMMENT='生产参数';
+-- 新建文件：src/main/resources/db/migration/V2__add_report_remark.sql
+ALTER TABLE qc_report ADD COLUMN remark VARCHAR(500) DEFAULT NULL COMMENT '备注';
 ```
 
-> 用户表与聊天模块沿用既有 `sys_user` / `chat` / `chat_record` 表（BCrypt 密码、status 0=禁用 1=启用）。
-> 注意：聊天模块 `ChatMapper` 中存在跨库查询 `mate10sql.chat`，若默认库不叫 `mate10sql` 需同步修改。
+重启应用后自动执行 ✅
+
+**三条铁律**：
+
+| 规则 | 说明 |
+|---|---|
+| 文件名必须 `V<版本>__<描述>.sql` | **双下划线**，一个都不能少 |
+| 已执行过的脚本**不可修改内容** | 校验和会变 → 启动直接失败 ❌ |
+| 要改结构请**新增版本** V3、V4… | 永远向前，不回头 ✅ |
+
+> 所有表统一建在 `mate10db`，不存在跨库查询。
 
 ### 4. 配置并运行
 
@@ -497,19 +485,26 @@ java -jar target/mate10-0.0.1-SNAPSHOT.jar
 src/main/java/org/mate/mate10/
 ├── Mate10Application.java        # 启动类
 ├── common/
-│   └── Result.java               # 统一响应封装 {code,msg,data}
+│   ├── Result.java               # 统一响应封装 {code,msg,data}
+│   └── GlobalExceptionHandler.java  # 全局异常处理（统一错误响应）
 ├── config/
-│   ├── CorsConfig.java           # 跨域（Vite 5173 白名单）
-│   ├── KafkaConfig.java          # Kafka 生产者/消费者/监听容器
-│   ├── LangChain4jConfig.java    # Ollama 对话/Embedding + MilvusEmbeddingStore
-│   ├── MilvusConfig.java         # MilvusClient Bean
-│   ├── MilvusProperties.java     # milvus.* 配置映射
-│   ├── MongoConfig.java          # MongoDB 连接与 Repository 扫描
-│   ├── MyBatisConfig.java        # MyBatis-Plus
-│   ├── OllamaProperties.java     # ollama.* 配置映射
-│   ├── RedisConfig.java          # RedisTemplate + 缓存管理
-│   ├── SecurityConfig.java       # Security（当前全放行）+ BCrypt
-│   └── TesseractConfig.java      # tesseract.* 配置映射（OCR）
+│   ├── SecurityConfig.java           # Security（JWT 无状态认证）+ BCrypt
+│   ├── JwtAuthenticationFilter.java  # JWT 解析过滤器（写入 SecurityContext）
+│   ├── CorsConfig.java               # 跨域（Vite 5173 白名单）
+│   ├── KafkaConfig.java              # Kafka 生产者/消费者/监听容器
+│   ├── LangChain4jConfig.java        # 按 @Profile 装配 Chat/Embedding + Milvus 存储
+│   ├── ChatModelFactory.java         # 对话模型工厂（ollama / cloud 双实现）
+│   ├── CloudAiProperties.java        # cloud-ai.* 配置映射
+│   ├── OllamaProperties.java         # ollama.* 配置映射
+│   ├── ChatContextBuilder.java       # 多轮对话上下文组装（历史裁剪 + 字符预算）
+│   ├── ChatProperties.java           # app.chat.* 配置映射
+│   ├── RagProperties.java            # app.rag.* 配置映射（分块参数）
+│   ├── PromptLoader.java             # 提示词模板加载
+│   ├── MilvusConfig.java             # MilvusClient Bean
+│   ├── MilvusProperties.java         # milvus.* 配置映射
+│   ├── MyBatisConfig.java            # MyBatis-Plus
+│   ├── RedisConfig.java              # RedisTemplate + 缓存管理
+│   └── TesseractConfig.java          # tesseract.* 配置映射（OCR）
 ├── controller/
 │   ├── ChatController.java       # /ai/chat、/ai/chatRecord
 │   ├── MongoChatController.java  # /api/chat/*
@@ -577,12 +572,87 @@ tesseract:               # 图片 OCR（需本机安装 Tesseract + 中文语言
 
 ---
 
+## 监控与可观测性
+
+基于 **Spring Boot Actuator + Micrometer**，指标以 Prometheus 格式导出。
+
+### Actuator 端点
+
+| 端点 | 访问控制 | 说明 |
+|---|---|---|
+| `/actuator/health` | ✅ 免认证 | 健康检查（含 db / mongo / redis / diskSpace 组件明细） |
+| `/actuator/prometheus` | ✅ 免认证 | Prometheus 指标抓取（裸文本格式） |
+| `/actuator/info` | 🔒 需认证 | 应用信息 |
+| `/actuator/metrics` | 🔒 需认证 | 指标列表与单项查询 |
+| `/actuator/flyway` | 🔒 需认证 | 数据库迁移状态 |
+| `/actuator/loggers` | 🔒 需认证 | 运行时动态调整日志级别 |
+
+> ⚠️ **只放行 `health` 与 `prometheus`**，其余端点保持需要认证。
+> `/actuator/heapdump`（堆内存快照）、`/actuator/env`（含密钥的配置）一旦公开会泄露敏感信息。
+
+### 暴露的关键指标
+
+| 指标 | 含义 |
+|---|---|
+| `jvm_memory_used_bytes` | JVM 各内存区使用量 |
+| `jvm_gc_pause_seconds` | GC 停顿时间 |
+| `http_server_requests_seconds` | HTTP 接口耗时直方图（可算 P95 / P99） |
+| `hikaricp_connections_active` | 数据库连接池活跃连接数 |
+| `system_cpu_usage` | 系统 CPU 使用率 |
+
+### 配置
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,flyway,loggers
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+```
+
+`health.show-details` 按环境区分（见 `application-dev.yml` / `application-prod.yml`）：
+
+| 环境 | 值 | 原因 |
+|---|---|---|
+| `dev` | `always` | 方便本地调试，直接看到各组件状态 |
+| `prod` | `when-authorized` | 不对外暴露数据库地址、磁盘路径等细节 |
+
+### 接入 Prometheus + Grafana
+
+`deploy/docker-compose.yml` 已包含 `prometheus` 与 `grafana` 两个服务：
+
+- Prometheus 通过 **Docker 内网** `backend:8080` 抓取指标 —— **不经过 Nginx，也不暴露公网** ✅
+- 抓取配置见 `deploy/prometheus.yml`（`scrape_interval: 15s`）
+- Grafana 暴露在 `3000` 端口用于查看仪表盘
+
+> 若将来把 Prometheus 部署到**外部机器**，则需要在 Nginx 层限制来源 IP
+> （`allow <Prometheus IP>; deny all;`），因为此时流量会经过 Nginx。
+
+---
+
 ## 已知事项 / Roadmap
 
-- **文件解析**：目前 `FileParseServiceImpl` 已实现 PDF（PDFBox）与图片 OCR（Tess4j）；Word / Excel 解析方法为预留（返回空串），上传 Word/Excel 时 AI 将无法提取内容。
-- **安全管理**：`SecurityConfig` 当前对接口匿名放行（`permitAll`），JWT 由应用层自行校验/签发，未配置全局 Filter 拦截，正式环境需收紧。
-- **数据库名不一致**：`application.yml` 默认库为 `mate10db`，但 `ChatMapper.selectByUserId` 硬编码了 `mate10sql.chat` 跨库查询，切换库名时需同步调整。
-- **JWT 密钥**：`JwtUtil` 中的 SECRET_KEY 为内置常量，生产环境应改为外部配置注入。
-- **读取spring.profiles.active优先级**:`命令行参数 <- JVW系统属性 <- 操作系统环境变量 <- application.yml`
-- 质检报告上传文件保存在运行目录 `uploads/qc/`（相对路径），部署时注意目录与磁盘清理策略。
+### 待完善
+
+- **文件解析**：`FileParseServiceImpl` 已实现 PDF（PDFBox）与图片 OCR（Tess4j）；
+  Word / Excel 解析方法为预留（返回空串），上传 Word/Excel 时 AI 无法提取内容。
+- **上传文件清理**：质检报告文件保存在运行目录 `uploads/qc/`（相对路径），
+  部署时需注意目录挂载与磁盘清理策略。
+- **Redis 缓存**：`RedisConfig` 已就绪，业务层尚未接入缓存注解（规划中）。
+
+### 设计说明（非缺陷）
+
+- **认证与鉴权**：`SecurityConfig` 采用 JWT **无状态认证**（`SessionCreationPolicy.STATELESS`），
+  由 `JwtAuthenticationFilter` 解析 token 并写入 `SecurityContext`。
+  仅放行登录、注册、Swagger，以及 Actuator 的 `health` / `prometheus`，其余接口均需认证。
+  未认证返回 **401**、无权限返回 **403**（由 `authenticationEntryPoint` / `accessDeniedHandler` 分别处理）。
+- **密钥外部化**：`JwtUtil` 通过 `@Value("${JWT_SECRET_KEY}")` 从环境变量注入，
+  并在 `@PostConstruct` 中做启动校验（缺失或不足 32 字节直接启动失败）。
+- **数据库**：所有表统一建在 `mate10db`，**不存在跨库查询**。
+- **Profile 优先级**（从高到低）：
+  `命令行参数` > `JVM 系统属性 (-D...)` > `操作系统环境变量` > `application.yml`
 

@@ -1,6 +1,6 @@
 # Mate10 容器化部署方案
 
-一套完整的 **9 服务编排**，已在华为云 ECS（Ubuntu 22.04 / 8 vCPU / 16 GB / x86_64）验证通过。
+一套完整的 **11 服务编排**，已在华为云 ECS（Ubuntu 22.04 / 8 vCPU / 16 GB / x86_64）验证通过。
 
 ---
 
@@ -9,7 +9,7 @@
 | 服务 | 镜像 | 对外端口 | 说明 |
 |---|---|---|---|
 | **frontend** | mate10-frontend | **80** | Nginx 托管 Vue 静态文件 + 反向代理 |
-| **backend** | mate10-backend | **8080** | Spring Boot 应用 |
+| backend | mate10-backend | `127.0.0.1:8080` | Spring Boot 应用（前端经 Docker 内网访问） |
 | mysql | mysql:8.0 | `127.0.0.1:3306` | 业务数据 |
 | mongo | mongo:6 | `127.0.0.1:27017` | 聊天记录 |
 | redis | redis:7-alpine | `127.0.0.1:6379` | 缓存 |
@@ -17,8 +17,11 @@
 | milvus | milvusdb/milvus:v2.6.16 | `127.0.0.1:19530` | 向量库 |
 | etcd | quay.io/coreos/etcd:v3.5.5 | — | Milvus 元数据 |
 | minio | minio/minio | — | Milvus 对象存储 |
+| prometheus | prom/prometheus | — | 指标抓取与存储（仅 Docker 内网） |
+| **grafana** | grafana/grafana | **3000** | 监控仪表盘 |
 
-> **安全设计**：除 `80` / `8080` 外，**所有中间件端口只绑定 `127.0.0.1`**，不对公网暴露。
+> **安全设计**：**只有 `80`（网站）与 `3000`（Grafana）对公网开放**，
+> 其余所有端口（含 backend 的 8080）**只绑定 `127.0.0.1`**。
 > 数据库端口一旦暴露到公网，会在数小时内被扫描并入侵（挖矿 / 勒索），这是最常见的云安全事故。
 
 服务间通过 **Docker 内部网络用服务名互访**（如 `mysql:3306`、`kafka:9092`），
@@ -79,16 +82,28 @@ docker compose up -d
 docker compose ps
 ```
 
-### 5. 初始化数据库
+### 5. 数据库初始化（无需手工操作）
+
+**表结构由 Flyway 在 backend 启动时自动创建** ✅
+
+- `MYSQL_DATABASE: mate10db` 已在 compose 中声明 → MySQL 首次启动自动建库
+- backend 启动时 Flyway 接着建表（`sys_user` / `qc_report` / `qc_defect` /
+  `qc_production_param` / `chat` / `chat_record`）
 
 ```bash
-# 建表（init.sql 在仓库 mate10/src/main/resources/sql/ 下）
-docker exec -i mate10-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" < init.sql
+# 验证 Flyway 是否执行成功
+docker compose logs backend | grep -i flyway
+# 期望：Successfully baselined schema with version: 1
+#   或：Successfully applied 1 migration to schema `mate10db`
 
-# 验证
+# 查看版本记录表
 docker exec mate10-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" \
-  -e "USE mate10db; SHOW TABLES;"
+  -e "USE mate10db; SELECT version, description, type, success FROM flyway_schema_history;"
 ```
+
+> ⚠️ 迁移脚本位于 `mate10/src/main/resources/db/migration/`，会打包进后端镜像。
+> **新增表结构变更请新建 `V2__xxx.sql`，不要修改已执行过的脚本**
+> （校验和变化会导致启动直接失败）。
 
 ### 6. 验证部署
 
@@ -100,6 +115,15 @@ curl -X POST "http://localhost:8080/blocker/user/login?username=probe&password=x
 # 前端
 curl -o /dev/null -w "%{http_code}\n" http://localhost/
 # 200
+
+# 健康检查（免认证，应返回 UP 及 db/mongo/redis/diskSpace 明细）
+curl http://localhost:8080/actuator/health
+
+# Prometheus 指标（免认证，返回裸文本）
+curl http://localhost:8080/actuator/prometheus | head -20
+
+# 确认其他端点【仍需认证】（应返回 401）
+curl -i http://localhost:8080/actuator/env
 ```
 
 ---
@@ -114,6 +138,7 @@ curl -o /dev/null -w "%{http_code}\n" http://localhost/
 | `JWT_SECRET_KEY` | ✅ | **至少 32 字节**，否则应用启动即失败 |
 | `DEEPSEEK_API_KEY` | ✅ | cloud 模式对话模型 |
 | `ZHIPU_API_KEY` | ✅ | cloud 模式 Embedding |
+| `GRAFANA_PASSWORD` | ✅ | Grafana 管理员密码（用户名固定 `admin`） |
 
 **⚠️ 密码建议用纯字母数字** —— MongoDB 的 URI 里密码需要 URL 编码，
 用特殊字符容易踩坑。
@@ -203,11 +228,111 @@ Docker 23+ 的 BuildKit 默认附加 provenance/SBOM 证明清单，镜像变成
 docker push --platform linux/amd64 <image>
 ```
 
+### Spring Boot 4.0：加了依赖却「什么都不发生」
+
+**现象**：`spring.flyway.*` 配置在 IDE 里报「无法解析配置属性」；
+应用启动后**没有任何 Flyway 日志**，`flyway_schema_history` 表也没建 —— 但**也不报错**。
+
+**原因**：Spring Boot 4.0 把自动配置**拆分成了独立模块**。
+只加第三方库（`flyway-core`）不会引入 Spring Boot 的集成层（`spring-boot-flyway`），
+自动配置不生效 —— **静默失效，最难排查**。
+
+**解法**：用 starter，而不是裸库：
+
+```xml
+<!-- ❌ 只有库，没有集成层 -->
+<dependency>
+    <groupId>org.flywaydb</groupId>
+    <artifactId>flyway-core</artifactId>
+</dependency>
+
+<!-- ✅ 含 spring-boot-flyway（FlywayAutoConfiguration） -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-flyway</artifactId>
+</dependency>
+<!-- MySQL 方言需单独加，starter 不含 -->
+<dependency>
+    <groupId>org.flywaydb</groupId>
+    <artifactId>flyway-mysql</artifactId>
+</dependency>
+```
+
+**通用规律**（SB 4.0 模块化陷阱 —— 「库 + 集成层」两件套）：
+
+| 中间件 | 库 | 集成层（必需） |
+|---|---|---|
+| Flyway | flyway-core | spring-boot-flyway |
+| MongoDB | mongodb-driver-sync | spring-boot-data-mongodb |
+| Kafka | kafka-clients | spring-boot-kafka |
+
+**排查方法**：
+
+1. IDE 报「无法解析配置属性」→ 大概率是集成模块不在类路径上
+   （**这个警告通常是真的，别急着当成 IDE 缓存问题**）
+2. 查官方文档的「自动配置类」附录，确认模块名
+3. `mvn dependency:tree` 确认模块是否真的被引入
+
 ### 前端请求为什么不用改代码
 
 开发环境靠 Vite 的 `server.proxy` 转发 `/blocker`、`/api`、`/rag`、`/ai`；
 生产环境由 Nginx 做同样的事。
 由于 axios 的 `baseURL` 是空字符串（走相对路径），**前端代码在两种环境下完全一致**。
+
+---
+
+## 监控（Prometheus + Grafana）
+
+### 指标链路
+
+```
+backend ──/actuator/prometheus──► prometheus ──► grafana
+（Micrometer 采集）              （抓取 + 存储）  （可视化 :3000）
+        ▲
+        └── 同 Docker 网络，用 backend:8080 内网抓取
+            不经过 Nginx，也不暴露公网 ✅
+```
+
+### 启动
+
+```bash
+docker compose up -d prometheus grafana
+docker compose ps          # 确认两个容器都是 Up
+```
+
+### 访问
+
+- **Grafana**：`http://<服务器IP>:3000`，账号 `admin`，密码为 `.env` 中的 `GRAFANA_PASSWORD`
+- **Prometheus**：未映射端口，仅内网可用；需要时用
+  `docker compose exec prometheus wget -qO- localhost:9090`
+
+### 验证抓取是否正常
+
+```bash
+docker compose exec prometheus \
+  wget -qO- 'http://localhost:9090/api/v1/targets' | head -c 500
+# 期望看到 "health":"up"
+```
+
+### Grafana 导入仪表盘
+
+登录后 `Dashboards` → `New` → `Import`，直接填官方模板 ID：
+
+| 模板 ID | 内容 |
+|---|---|
+| `11378` | JVM (Micrometer) —— 内存 / GC / 线程 |
+| `12900` | Spring Boot 综合面板（HTTP / 连接池 / JVM） |
+
+数据源选 `Prometheus`，URL 填 `http://prometheus:9090` ✅
+
+### 常见问题
+
+| 现象 | 原因 |
+|---|---|
+| Grafana 无数据 | backend 未重启（配置未生效），或 Prometheus 抓取返回 401 |
+| 抓取 401 | `SecurityConfig` 未放行 `/actuator/prometheus` |
+| 抓取 404 | `management.endpoints.web.exposure.include` 未包含 `prometheus` |
+| 抓取连接失败 | 目标写成了 `localhost:8080` —— **容器里的 localhost 是容器自己**，必须用 `backend:8080` |
 
 ---
 

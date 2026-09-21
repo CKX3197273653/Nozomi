@@ -120,17 +120,24 @@ java -jar target/mate10-0.0.1-SNAPSHOT.jar
 > 两个模式的知识库互相独立，切换模式后需重新"初始化质检知识库"。
 > 两种 profile 各提供 `ChatModel` 与 `StreamingChatModel`（类型不同，不会冲突）。
 
-### 数据库初始化
+### 数据库初始化（Flyway 管理）
 
-新环境一键建库建表：
+**表结构由 Flyway 在应用启动时自动创建**，无需手工执行 SQL。
 
 ```bash
-mysql -uroot -proot --default-character-set=utf8mb4 < mate10/src/main/resources/sql/init.sql
+# 只需先建空库（Flyway 不负责创建 database 本身）
+mysql -uroot -proot -e "CREATE DATABASE IF NOT EXISTS mate10db \
+  DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 ```
 
-- `mate10db`：sys_user、qc_report、qc_defect、qc_production_param、chat_record、chat
+- 迁移脚本：`src/main/resources/db/migration/V1__init_schema.sql`
+- 建表内容：`sys_user` / `qc_report` / `qc_defect` / `qc_production_param` / `chat` / `chat_record`
+- **已有数据的库**：Flyway 会自动 baseline（记为已迁移），不会重复建表
 
-> 数据库结构变更后，务必同步更新 `sql/init.sql`（保持脚本与实际库一致）。
+**新增结构变更**：新建 `V2__xxx.sql`（**双下划线**），重启后端自动执行 ✅
+
+> ⚠️ **已执行过的脚本不可修改内容** —— 校验和变化会导致启动直接失败。
+> 要改结构请新增版本 V3、V4…，永远向前、不回头。
 > 所有表统一建在 `mate10db`，**不要再用跨库查询**（历史遗留的 `mate10sql` 已废弃）。
 
 ### 关键配置与硬编码
@@ -139,7 +146,39 @@ mysql -uroot -proot --default-character-set=utf8mb4 < mate10/src/main/resources/
 - Tesseract、JWT 密钥均已外部化为环境变量（见上表）
 - **JWT 有效期 7 天**：过期后接口返回 401（`SecurityConfig` 已配置 `AuthenticationEntryPoint`）
 
+### 监控端点（Actuator + Prometheus）
+
+| 端点 | 访问 | 说明 |
+|---|---|---|
+| `/actuator/health` | ✅ 免认证 | 健康检查（含 db / mongo / redis 明细） |
+| `/actuator/prometheus` | ✅ 免认证 | Prometheus 指标抓取 |
+| 其余 `/actuator/**` | 🔒 **需认证** | metrics / flyway / loggers / env / heapdump … |
+
+> ⚠️ **不要图省事放行整个 `/actuator/**`**：
+> `/actuator/heapdump` 能下载堆内存快照（含密钥、token），`/actuator/env` 能看到全部配置。
+> 配置见 `application.yml` 的 `management.*`，安全规则见 `SecurityConfig`。
+
+**SB 4.0 属性名变化（写了会被静默忽略）**：
+
+- `management.endpoint.<id>.enabled` ❌ 已移除 → 改用 `management.endpoint.<id>.access`
+  （取值 `NONE` / `READ_ONLY` / `UNRESTRICTED`）
+- Prometheus 新前缀：`management.prometheus.metrics.export.*`
+  （旧的 `management.metrics.export.prometheus.*` 仍兼容但不推荐）
+
 ### 已知问题
+
+- **Spring Boot 4.0 模块化陷阱（重要）**：SB 4.0 把自动配置拆成了独立模块，
+  加中间件需要「**库 + 集成层**」两件套。只加库会**静默失效** ——
+  无报错、无日志、配置属性无法解析，最难排查：
+
+  | 中间件 | 库 | 集成层（必需） |
+  |---|---|---|
+  | Flyway | flyway-core | spring-boot-flyway（或 `spring-boot-starter-flyway`） |
+  | MongoDB | mongodb-driver-sync | spring-boot-data-mongodb |
+  | Kafka | kafka-clients | spring-boot-kafka |
+
+  **排查三步**：① IDE 报「无法解析配置属性」通常是真的，别急着当缓存问题
+  ② 查官方文档「自动配置类」附录确认模块名 ③ `mvn dependency:tree` 确认是否引入
 
 - **无测试文件**：`src/test/java` 为空，无单元测试
 - **Swagger UI**：`http://localhost:8080/swagger-ui.html`（已放行匿名访问）
@@ -207,7 +246,7 @@ npm run preview   # 预览构建结果
       否则日志压缩时可能因文件被占用而失败（`AccessDeniedException: 另一个程序正在使用此文件`）
     - `kafka-server-stop.bat` 仍含 wmic 检测，Windows 11 24H2 上停止可能失败，可直接杀进程
 6. 前端 `npm run build` 前必须确认后端已运行，否则代理不可用
-7. 数据库初始化请使用 `sql/init.sql`（勿手写建表，避免与脚本漂移）
+7. 数据库表结构由 **Flyway 在启动时自动创建**（`db/migration/`），不要手工建表
 8. **改完代码必须重启后端再测**——否则测的是上一次编译的 class，结论不可信
 
 ---
@@ -218,7 +257,7 @@ npm run preview   # 预览构建结果
 
 1. **装环境**：JDK 17、Node.js 20.19+、MySQL、MongoDB、Redis、Kafka、Docker、Ollama、Tesseract
 2. **拉代码**：`git clone <仓库地址>`
-3. **初始化数据库**：执行 `sql/init.sql`
+3. **初始化数据库**：建空库 `mate10db` 即可，表结构由 Flyway 启动时自动创建
 4. **拉模型**：`ollama pull deepseek-r1:latest`、`ollama pull all-minilm:latest`
 5. **启动中间件**：MySQL → MongoDB → Redis → Kafka → Milvus → Ollama
 6. **配置后端**（IDEA）：
@@ -242,6 +281,35 @@ npm run preview   # 预览构建结果
   用管理员执行 `net stop winnat` → `netsh int ipv4 add excludedportrange protocol=tcp startport=19530 numberofports=1` → `net start winnat`
 - **镜像内 Tesseract 路径**：`/usr/bin/tesseract` + `/usr/share/tesseract-ocr/5/tessdata`
 - **prod 配置刻意无默认值**：`MILVUS_USERNAME` 等缺失时启动即失败（fail-fast）
+- **Nginx 配置改完必须先校验**：`nginx.conf` 里 `allow` / `proxy_set_header` 少个分号、
+  多个冒号，Nginx 会**拒绝启动**（前端容器起不来，网站直接打不开）。校验命令：
+
+  ```bash
+  docker run --rm -v "<绝对路径>/mate10-V/nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:alpine nginx -t
+  ```
+
+  报 `host not found in upstream "backend"` 是**正常的** —— `backend` 只在 compose 网络内可解析。
+  只要不是 `unknown directive` / `invalid number of arguments` 就说明语法没问题 ✅
+
+- **compose 改完先校验**：`docker compose -f deploy/docker-compose.yml config`。
+  YAML 靠缩进，服务名必须与同级服务严格对齐；报
+  `additional properties 'xxx' not allowed` 就是缩进错层了
+- **监控服务**：`prometheus` 走 Docker 内网 `backend:8080` 抓取（不经过 Nginx、不暴露端口）；
+  `grafana` 暴露 `3000`，管理员密码取自 `.env` 的 `GRAFANA_PASSWORD`
+
+### 文档地图（改文档前先看这里）
+
+| 文件 | 职责 |
+|---|---|
+| `README.md`（根） | 门户：介绍 + 截图 + 亮点 + 快速开始，细节下沉到子文档 |
+| `mate10/README.md` | 后端：功能、API 表、包结构、配置、监控 |
+| `mate10-V/README.md` | 前端：页面、路由、组件、构建 |
+| `deploy/README.md` | 部署运维：Docker、Nginx、监控、备份、踩坑 |
+| `AGENTS.md`（本文） | 给 AI/新人的环境说明、约定、踩坑手册 |
+
+> ⚠️ **`mate10/src/main/resources/knowledge/*.md` 不是文档，是 RAG 知识库数据源**！
+> 它们会被读入 Milvus 做向量检索，**整理文档时绝对不要动**。
+> `.opencode/agents/*.md` 同理（是工具配置，不是项目文档）。
 
 ### 无害告警（不用处理）
 
@@ -256,9 +324,13 @@ npm run preview   # 预览构建结果
 
 ---
 
+## 待办 / 学习资料
+- RAG 评测规划与教材存档：`Mate10\RAGAS.md`
+
 ## 版本里程碑
 
 | 标签 | 内容 |
 |---|---|
 | `v0.1.0` | 多轮对话记忆：上下文注入、会话隔离、RAG 融合 |
 | `v0.2.0` | 流式输出：SSE 端点 + 前端逐字渲染 |
+| `v0.5.0` | 容器化部署（11 服务）· Flyway 迁移 · Actuator/Prometheus 监控 |
