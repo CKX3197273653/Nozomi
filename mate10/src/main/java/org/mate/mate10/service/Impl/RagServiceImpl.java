@@ -12,6 +12,7 @@ import dev.langchain4j.model.ollama.OllamaChatModel;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
 import dev.langchain4j.store.embedding.EmbeddingStore;
+import lombok.extern.slf4j.Slf4j;
 import org.mate.mate10.config.ChatModelFactory;
 import org.mate.mate10.config.RagProperties;
 import org.mate.mate10.service.RagService;
@@ -24,6 +25,7 @@ import java.util.List;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 public class RagServiceImpl implements RagService {
 
@@ -139,6 +141,7 @@ public class RagServiceImpl implements RagService {
 
     @Override
     public String qcAsk(String question) {
+        long start = System.currentTimeMillis();
         String context = retrieve(question);
         String prompt = """
                 你是一个专业的质量检测助手，请根据以下知识回答问题。
@@ -151,8 +154,12 @@ public class RagServiceImpl implements RagService {
                 """.formatted(
                 (context == null || context.isEmpty()) ? "（无相关参考资料）" : context,
                 question);
+        String answer = chatModelFactory.getChatModel().chat(prompt);
+        log.info("[RAG] qcAsk 完成，耗时 {} ms（检索资料 {} 字符）",
+        System.currentTimeMillis() - start,
+        context == null ? 0 : context.length());
 
-        return chatModelFactory.getChatModel().chat(prompt);
+        return answer;
     }
 
     @Override

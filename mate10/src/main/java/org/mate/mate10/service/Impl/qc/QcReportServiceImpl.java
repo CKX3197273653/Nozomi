@@ -377,6 +377,7 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
 
     @Override
     public Map<String, Object> analyzeRootCause(Long reportId) {
+        long start = System.currentTimeMillis();
        Map<String,Object> result = new java.util.HashMap<>();
        try{
            //查询列表
@@ -399,7 +400,6 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
            }
            //构建根因分析
            String prompt = buildRootCausePrompt(report, defects, param);
-//调用ai
             dev.langchain4j.data.message.ChatMessage userMessage = dev.langchain4j.data.message.UserMessage.from(prompt);
             dev.langchain4j.model.chat.response.ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
            String aiResponse = response.aiMessage().text();
@@ -413,7 +413,8 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
            log.error("根因分析 失败"+e.getMessage(),e);
            result.put("error", "根因分析失败：" + e.getMessage());
        }
-       return result;
+        log.info("[L0] 根因分析完成，耗时 {} ms", System.currentTimeMillis() - start);
+        return result;
     }
     //分析prompt
     private String buildRootCausePrompt(QcReport report, List<QcDefect> defects, QcProductionParam param) {
