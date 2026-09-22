@@ -34,4 +34,5 @@ public interface QcAnalysisAgent {
         重要：只依据工具返回的真实数据作答，不确定时如实说明，不要臆测。
         """)
     String analyze(@UserMessage String question);
+
 }

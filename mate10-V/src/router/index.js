@@ -48,6 +48,12 @@ const routes = [
         name: 'QA',
         component: () => import('@/views/qc/QA.vue'),
         meta: { title: '知识问答', icon: 'ChatDotRound' }
+      },
+      {
+        path: 'agent',
+        name: 'Agent',
+        component: () => import('@/views/qc/Agent.vue'),
+        meta: { title: '质检 Agent', icon: 'MagicStick' }
       }
     ]
   }
@@ -57,14 +63,11 @@ const router = createRouter({
   history: createWebHistory(),
   routes
 })
-//未登录则跳转登录页（return 风格，替代已弃用的 next() 回调）
 router.beforeEach((to) => {
   const token = localStorage.getItem('token')
   if (to.path === '/login') {
-    // 已登录则跳转首页
     return token ? '/' : true
   }
-  // 未登录跳转登录页
   return token ? true : '/login'
 })
 

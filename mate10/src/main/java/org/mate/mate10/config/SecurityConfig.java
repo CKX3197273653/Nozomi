@@ -1,5 +1,6 @@
 package org.mate.mate10.config;
 
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -33,6 +34,8 @@ public class SecurityConfig {
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 // 授权规则
                 .authorizeHttpRequests(auth -> auth
+                        //异步/错误派发不会再重复授权
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                         // 放行：登录、注册、Swagger
                         .requestMatchers("/blocker/user/login", "/blocker/user/register").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()

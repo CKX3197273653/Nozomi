@@ -165,6 +165,46 @@ mysql -uroot -proot -e "CREATE DATABASE IF NOT EXISTS mate10db \
 - Prometheus 新前缀：`management.prometheus.metrics.export.*`
   （旧的 `management.metrics.export.prometheus.*` 仍兼容但不推荐）
 
+### 质检分析 Agent（LangChain4j `@Tool`，L1）
+
+**端点**：`POST /ai/qc-agent`，body `{"question": "分析 R20260808001 的根因"}`
+
+**与 L0 的区别**：`GET /api/qc/report/{id}/root-cause` 是**固定管道**（顺序写死在代码里）；
+Agent 则由**模型自主决定**调哪些工具、什么顺序 → 控制流从开发者转移到模型。
+
+| 组件 | 职责 |
+|---|---|
+| `agent/QcAgentTools.java` | 工具集（**全部只读**） |
+| `agent/QcAnalysisAgent.java` | Agent 接口 + SystemMessage（含"禁止臆测"约束） |
+| `config/QcAgentConfig.java` | 按 profile 装配，直接构造 ChatModel 避免 Bean 歧义 |
+| `controller/qc/QcAgentController.java` | HTTP 入口 |
+
+**可用工具**：
+
+| 工具 | 底层方法 | 用途 |
+|---|---|---|
+| `getReportByNo(reportNo)` | `QcReportService.getByReportNo` | 按业务编号（`R2026…`）换数字 ID |
+| `getReport(reportId)` | `QcReportService.getById` | 报告背景 |
+| `getDefects(reportId)` | `QcDefectService.getByReportId` | 缺陷构成 |
+| `searchKnowledge(question)` | `RagService.retrieve` | 检索质量标准（**用 retrieve 不用 ask**，只给素材不让它二次生成） |
+
+**⚠️ 安全边界**：只暴露读操作 —— `deleteReport` / `updateStatus` / `confirmDefect` **一律不暴露**，
+即使被提示词注入，模型也只能读不能改。
+
+**模型选择**（Agent 需要 Function Calling）：
+
+| profile | Agent 用的模型 | 说明 |
+|---|---|---|
+| `ollama` | `ollama.agent-model`（默认 `llama3.1`） | ⚠️ `deepseek-r1` 是推理模型，工具调用能力弱，故**单独配一个字段** |
+| `cloud` | `cloud-ai.chat.model`（`deepseek-chat`） | ✅ 原生支持 Function Calling |
+
+**验证方式**：看日志里的 `[Tool]` 调用序列 —— 出现多条且顺序不固定 = 模型在自主决策 ✅
+（`QcAgentTools` 每个工具都打了 `log.info("[Tool] ...")`）
+
+> 💡 依赖：**零新增**。`langchain4j-core` 已含 `@Tool` / `@P`，
+> `langchain4j` 已含 `AiServices`，无需引入 LangGraph。
+> 只有做**多 Agent 协作 / 人工审批断点**时才需要考虑图编排。
+
 ### 已知问题
 
 - **Spring Boot 4.0 模块化陷阱（重要）**：SB 4.0 把自动配置拆成了独立模块，
@@ -179,6 +219,49 @@ mysql -uroot -proot -e "CREATE DATABASE IF NOT EXISTS mate10db \
 
   **排查三步**：① IDE 报「无法解析配置属性」通常是真的，别急着当缓存问题
   ② 查官方文档「自动配置类」附录确认模块名 ③ `mvn dependency:tree` 确认是否引入
+
+- **Redis 缓存序列化必须写入类型信息（重要，隐蔽）** ⚠️
+
+  `new GenericJacksonJsonRedisSerializer(objectMapper)` 构造时
+  **不会开启 default typing** → 序列化出的 JSON **不含 `@class`**
+  → 反序列化退化成 `LinkedHashMap` → 读取时报：
+
+  ```
+  ClassCastException: class java.util.LinkedHashMap
+      cannot be cast to class org.mate.mate10.entity.qc.QcReport
+  ```
+
+  **正确写法**（用 Spring 官方 builder）：
+
+  ```java
+  GenericJacksonJsonRedisSerializer.builder()
+          .enableDefaultTyping(BasicPolymorphicTypeValidator.builder()
+                  .allowIfSubType("org.mate.mate10.")
+                  .allowIfSubType("java.util.")
+                  .allowIfSubType("java.lang.")
+                  .allowIfSubType("java.math.")
+                  .allowIfSubType("java.time.")
+                  .build())
+          .build();
+  ```
+
+  - **验证**：`redis-cli GET "qcDetail::report:1"` 应能看到 `"@class":"org.mate..."`
+  - **修复后必须清旧缓存**：`redis-cli FLUSHDB`
+    （旧数据没有 `@class`，即使代码修好仍会报错）
+
+- **`@Cacheable` 遇到 null 返回值会抛异常**：
+  `RedisConfig` 配了 `disableCachingNullValues()`，方法返回 null 时 Spring 会抛
+  `Cache 'xxx' does not allow 'null' values`。
+  **解法**：给可能返回 null 的方法加 `unless = "#result == null"` ⚠️ `#` 不能少。
+
+- **`@Cacheable` / `@CacheEvict` 的 SpEL 是字符串，编译期不校验** ⚠️：
+  写成 `unless = "result == null"`（漏了 `#`）**能编译通过**，
+  但运行时抛 `SpelEvaluationException: EL1008E: Property or field 'result' cannot be found`。
+  **IDE 不会有任何提示**，改缓存注解后务必实测。
+
+- **`@Cacheable` 只在外部调用时生效**：
+  同类内部 `this.method()` 自调用不走 AOP 代理。
+  如 `createFullReport` 内部调 `this.createReport()`，必须给**入口方法**也加注解。
 
 - **无测试文件**：`src/test/java` 为空，无单元测试
 - **Swagger UI**：`http://localhost:8080/swagger-ui.html`（已放行匿名访问）
@@ -240,11 +323,34 @@ npm run preview   # 预览构建结果
     - 数据目录：`log.dirs=kraft-logs`、`metadata.log.dir=kraft-meta`（**两者都不能删**）
     - **格式化必须加 `--standalone`**：
       `bin\windows\kafka-storage.bat format --standalone -t <集群ID> -c config\server.properties`
-    - **数据目录不能被设成只读**：`kraft-meta` 下 `.checkpoint` 文件若为 ReadOnly，
-      启动会报 `No meta.properties found`，用 `attrib -R "路径\*.checkpoint*"` 清除
-    - **建议把 `D:\Kafka` 加入 Windows Defender 排除目录**，
-      否则日志压缩时可能因文件被占用而失败（`AccessDeniedException: 另一个程序正在使用此文件`）
     - `kafka-server-stop.bat` 仍含 wmic 检测，Windows 11 24H2 上停止可能失败，可直接杀进程
+
+    - **⚠️ 启动失败的三种报错，同一个根因（文件只读 / 被占用）**：
+
+      | 报错信息 | 触发点 |
+      |---|---|
+      | `No meta.properties found` | `.checkpoint` 文件为**只读** |
+      | `AccessDeniedException: 另一个程序正在使用此文件` | 日志压缩时文件被占用 |
+      | `FileSystemException: atomic move failed` → `Shutdown broker because all log dirs have failed` | **Log Cleaner 原子重命名失败** |
+
+      **排查方法**：去 `logs\server.log` 往上翻 ——
+      **最后一行只是「结果」，要往上找第一个真正的异常** ⚠️
+      （例：`all log dirs have failed` 只是结果，真正原因在它上面几十行的
+      `Cleaner.doClean → atomicMoveWithFallback` 栈里）
+
+      **三级解法（按顺序试）**：
+
+      1. 清只读属性：
+         `attrib -R "D:\Kafka\kafka_2.13-4.1.0\kraft-meta\*.*" /S`
+         （`kraft-logs` 同样处理）
+      2. 加 Defender 排除（**需管理员**）：
+         `powershell -NoProfile -Command "Add-MpPreference -ExclusionPath 'D:\Kafka'"`
+         图形界面：Windows 安全中心 → 病毒和威胁防护 → 管理设置 → 排除项
+      3. **兜底（无需管理员，开发环境够用）**：在 `config\server.properties`
+         **末尾**加一行 `log.cleaner.enable=false`，禁用日志压缩器，
+         彻底绕开 `__consumer_offsets` 的清理操作。
+         代价：该 topic 不再压缩（多占少量磁盘），**生产环境不建议**。
+
 6. 前端 `npm run build` 前必须确认后端已运行，否则代理不可用
 7. 数据库表结构由 **Flyway 在启动时自动创建**（`db/migration/`），不要手工建表
 8. **改完代码必须重启后端再测**——否则测的是上一次编译的 class，结论不可信
@@ -325,7 +431,8 @@ npm run preview   # 预览构建结果
 ---
 
 ## 待办 / 学习资料
-- RAG 评测规划与教材存档：`Mate10\RAGAS.md`
+- RAG 评测规划与教材存档：`RAGAS.md`（在**桌面**，未纳入仓库；
+  内容是 Java 版 RAGAS 四维评测的学习卡与差异化定位笔记）
 
 ## 版本里程碑
 
@@ -333,4 +440,6 @@ npm run preview   # 预览构建结果
 |---|---|
 | `v0.1.0` | 多轮对话记忆：上下文注入、会话隔离、RAG 融合 |
 | `v0.2.0` | 流式输出：SSE 端点 + 前端逐字渲染 |
+| `v0.3.0` | Redis 缓存：`@EvictQcCache` 组合注解 + TTL 分级（5min / 30min） |
+| `v0.4.0` | 质检分析 Agent：LangChain4j `@Tool`，模型自主调用工具（L1） |
 | `v0.5.0` | 容器化部署（11 服务）· Flyway 迁移 · Actuator/Prometheus 监控 |
