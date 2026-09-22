@@ -43,6 +43,7 @@
         <poi-ooxml>5.2.5</poi-ooxml>
         <poi-scratchpad>5.2.5</poi-scratchpad>
         <poi>5.2.5</poi>
+        <HHJS>9.0.0</HHJS>
 
     </properties>
     <dependencies>
@@ -257,6 +258,17 @@
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+        <!--混合检索BM25 Lucen目前通过 ik-analyzer传递引入,显式声明更稳-->
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-core</artifactId>
+            <version>${HHJS}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-queryparser</artifactId>
+            <version>${HHJS}</version>
         </dependency>
     </dependencies>
 

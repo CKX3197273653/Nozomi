@@ -18,4 +18,9 @@ public class RagProperties {
     private  int chunkOverlap = 128;
     //是否按照标题分块
     private boolean useHeadingSplit = true;
+    //索引目录
+    private String luceneDir = "./data/lucene-index";
+    //混合检索
+    private boolean hybridEnabled = true;
+
 }

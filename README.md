@@ -31,6 +31,7 @@
 | **缺陷管理** | 缺陷类型 / 等级 / 处置记录 |
 | **生产参数管理** | 工艺参数维护与追溯 |
 | **AI 对话助手** | 多轮对话记忆（MongoDB 持久化）+ SSE 流式逐字输出 |
+| **AI 质检 Agent** | 模型**自主调用工具**（LangChain4j `@Tool`），SSE 实时展示调用轨迹 |
 | **RAG 知识库问答** | 文档分块 → 向量检索 → 增强回答，附评测体系 |
 | **3D 模型查看** | GLB 模型加载（Three.js） |
 
@@ -85,6 +86,7 @@
 |---|---|
 | **RAG 检索优化** | 通过分块策略调优，检索命中率 **86.7% → 96.7%**（附完整实验记录） |
 | **流式输出** | SSE + 独立线程池 + `try/finally` 保证 `done` 事件；前端用 `fetch` + `ReadableStream` 绕过 EventSource 的鉴权限制 |
+| **Agent 化（L0 → L1）** | 把质检查询封装为 `@Tool`，**控制流从开发者转移到模型**；用 `beforeToolExecution` + `ToolExecutedEventListener` 做**零侵入**轨迹埋点（工具代码一行不改），SSE 实时展示调用过程 |
 | **安全加固** | 方法级权限（`@PreAuthorize`）替代前端传参判断；JWT 密钥强度启动校验；密码字段 `WRITE_ONLY` 防泄露 |
 | **配置外部化** | 双维度 Profile（环境 `dev/prod` × AI `ollama/cloud`，共 4 种组合）；生产配置**刻意无默认值**，缺失即 fail-fast |
 | **测试与 CI** | 13 个单元测试（覆盖上下文组装、JWT 安全不变量、登录分支）；GitHub Actions 自动验证 |
@@ -174,6 +176,50 @@ Docker 23+ 的 BuildKit 默认给镜像附加 provenance/SBOM 证明，镜像变
 
 Hyper-V/WinNAT 开机时动态圈占端口范围，导致 Docker 无法绑定（报 `socket ... forbidden`）。
 **解法**：`net stop winnat` → `netsh int ipv4 add excludedportrange ...` 永久排除 → `net start winnat`。
+</details>
+
+<details>
+<summary><b>SSE 流式接口数据正常，日志却报 Access Denied</b></summary>
+
+SSE 的数据已正常返回（前端也正常显示），但日志紧跟一条
+`AuthorizationDeniedException: Access Denied`。
+
+**根因**：`SseEmitter.complete()` 会让 Tomcat 触发 **ASYNC dispatch**，
+而 Spring Security 7 默认对**所有 dispatcherType** 做授权检查 ——
+此时异步线程里 `SecurityContext` 已清空，被 `anyRequest().authenticated()` 拒绝。
+
+**解法**（1 行）：
+```java
+.authorizeHttpRequests(auth -> auth
+        .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
+        ...)
+```
+
+**教训**：ASYNC 派发**不是新请求**，是同一请求的延续 ——
+第 1 次 REQUEST 派发时已用 JWT 检查过，放行它不降低安全性。
+</details>
+
+<details>
+<summary><b>Redis 缓存读出来变成 LinkedHashMap</b></summary>
+
+用 `new GenericJacksonJsonRedisSerializer(objectMapper)` 构造序列化器时
+**不会开启 default typing** → 写入的 JSON **不含 `@class`** →
+反序列化退化成 `LinkedHashMap` → 读取时报
+`ClassCastException: LinkedHashMap cannot be cast to ...`
+
+**解法**：用 Spring 官方 builder 显式开启类型信息：
+```java
+GenericJacksonJsonRedisSerializer.builder()
+        .enableDefaultTyping(BasicPolymorphicTypeValidator.builder()
+                .allowIfSubType("org.mate.mate10.")
+                .allowIfSubType("java.util.")
+                ...
+                .build())
+        .build();
+```
+
+**验证**：`redis-cli GET "qcDetail::report:1"` 应看到 `"@class":"org.mate..."`。
+**⚠️ 修复后必须清旧缓存**（`redis-cli FLUSHDB`）—— 旧数据没有 `@class`，仍会报错。
 </details>
 
 ---

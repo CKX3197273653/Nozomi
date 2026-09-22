@@ -4,9 +4,11 @@ import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import lombok.extern.slf4j.Slf4j;
 import org.mate.mate10.entity.qc.QcDefect;
+import org.mate.mate10.entity.qc.QcProductionParam;
 import org.mate.mate10.entity.qc.QcReport;
 import org.mate.mate10.service.RagService;
 import org.mate.mate10.service.qc.QcDefectService;
+import org.mate.mate10.service.qc.QcProductionParamService;
 import org.mate.mate10.service.qc.QcReportService;
 import org.springframework.stereotype.Component;
 
@@ -19,12 +21,15 @@ import java.util.stream.Collectors;
 public class QcAgentTools {
     private final QcReportService reportService;
     private final QcDefectService defectService;
+    private final QcProductionParamService paramService;
     private final RagService ragService;
 
-    public QcAgentTools(QcReportService reportService, QcDefectService defectService, RagService ragService) {
+    public QcAgentTools(QcReportService reportService, QcDefectService defectService, RagService ragService,  QcProductionParamService paramService) {
         this.reportService = reportService;
         this.defectService = defectService;
         this.ragService = ragService;
+        this.paramService = paramService;
+
     }
     @Tool("""
         获取质检报告的基本信息。
@@ -123,5 +128,34 @@ public class QcAgentTools {
                 r.getId(), r.getReportNo(), r.getProductName(), r.getProductBatch(),
                 r.getProductionLine(), r.getInspector(), r.getStatus(),
                 r.getTotalDefects(), r.getSeverityLevel());
+    }
+    @Tool("""
+        查询指定报告的【生产参数】（工艺实测数据）。
+        返回：温度(°C)、压力(MPa)、湿度(%)、速度(rpm)、操作员、备注。
+        用途：判断缺陷是否由工艺参数异常导致时，必须调用本工具获取【实测值】，
+             不要用知识库案例里的参数代替 —— 那是别的报告的记录。
+        提示：报告里的 remark 字段常包含工艺异常的直接线索（如"温度严重超标"）。
+        """)
+    public String getProductionParams(@P("质检报告 ID，整数") Long reportId) {
+        log.info("[Tool] getProductionParams(reportId={})", reportId);
+
+        QcProductionParam p = paramService.getByReportId(reportId);
+        if (p == null) {
+            return "报告 " + reportId + " 没有生产参数记录。";
+        }
+        return """
+            温度: %s °C
+            压力: %s MPa
+            湿度: %s %%
+            速度: %s rpm
+            操作员: %s
+            备注: %s
+            """.formatted(
+                p.getTemperature(),
+                p.getPressure(),
+                p.getHumidity(),
+                p.getSpeed(),
+                p.getOperator(),
+                p.getRemark() == null ? "-" : p.getRemark());
     }
 }

@@ -14,6 +14,7 @@
 - [项目结构](#项目结构)
 - [配置说明](#配置说明)
 - [监控与可观测性](#监控与可观测性)
+- [质检分析 Agent](#质检分析-agent)
 - [已知事项 / Roadmap](#已知事项--roadmap)
 
 ---
@@ -50,6 +51,13 @@
 ### 5. 用户认证与管理
 - Spring Security + BCrypt + JWT（登录签发 token，默认 7 天有效）
 - 用户登录（用户名或邮箱）、新增/更新/禁用/删除（管理操作需 `role=1`）、改密码、查重
+
+### 6. 质检分析 Agent（L1，模型自主决策）
+- 基于 LangChain4j `@Tool`：把质检数据查询封装为**工具**，由**模型自主决定**调哪些、什么顺序
+- 支持 **SSE 流式**推送**工具调用轨迹**（前端实时看到 Agent 在做什么）
+- 与固定管道（L0）形成对照：`GET /api/qc/report/{id}/root-cause` 顺序写死；Agent 则控制流在模型手里
+- **安全边界**：只暴露只读工具，即使被提示词注入，模型也只能读不能改
+- 零新增依赖，零侵入（工具代码不含任何埋点）
 
 ---
 
@@ -404,9 +412,30 @@ java -jar target/mate10-0.0.1-SNAPSHOT.jar
 |------|--------------------------------------|-------------------------------------------|-------------------------------------|
 | POST | `/ai/chat`                           | body `Chat{userId,title}`                 | 创建会话                                |
 | POST | `/ai/chatRecord`                     | body `ChatRequest{message,userId,chatId}` | 发送消息并返回 AI 回答（存 MongoDB + Kafka 落库） |
+| POST | `/ai/chat/stream`                    | body `ChatRequest{message,userId,chatId,mode}` | **SSE 流式**对话，逐字返回                |
 | GET  | `/api/chat/messages/{chatId}`        | -                                         | 按会话查消息                              |
 | GET  | `/api/chat/user/{userId}/messages`   | -                                         | 按用户查消息                              |
 | GET  | `/api/chat/messages/{chatId}/{role}` | `role=User/ai`                            | 按会话+角色查消息                           |
+
+### 质检分析 Agent `/ai/qc-agent`
+
+| 方法 | 路径 | 参数 | 说明 |
+|---|---|---|---|
+| POST | `/ai/qc-agent` | body `{"question": "分析 R20260808001 的根因"}` | 非流式，一次性返回结论 |
+| POST | `/ai/qc-agent/stream` | 同上 | **SSE 流式**，实时推送工具调用轨迹 + 结论 |
+
+**流式事件序列**：
+
+```
+event:start   data: 问题文本
+event:tool    data: {"name":"getReport","args":"{...}","status":"running","result":""}
+event:tool    data: {"name":"getReport","status":"done","result":"报告ID: 1 ..."}
+event:message data: "## 根因判断 ..."
+event:done    data: [DONE]
+```
+
+> ⚠️ `message` 事件含换行的 Markdown，会被 SSE 规范拆成多个 `data:` 行 ——
+> 前端必须用 `\n` 拼回（见 `mate10-V/src/api/agent.js`）。
 
 ### RAG 知识库 `/rag`
 
@@ -631,6 +660,92 @@ management:
 
 > 若将来把 Prometheus 部署到**外部机器**，则需要在 Nginx 层限制来源 IP
 > （`allow <Prometheus IP>; deny all;`），因为此时流量会经过 Nginx。
+
+---
+
+## 质检分析 Agent
+
+基于 **LangChain4j `@Tool`** 实现 L1 Agent：把质检数据查询封装为**工具**，
+由**模型自主决定**调哪些工具、以什么顺序调查。
+
+### 与 L0（固定管道）的区别
+
+| | L0：`GET /api/qc/report/{id}/root-cause` | L1：`POST /ai/qc-agent` |
+|---|---|---|
+| 控制流 | **开发者**（顺序写死在代码里） | **模型**（自主规划） |
+| 灵活性 | 只能按预设路径 | 可按情况调整调查策略 |
+| 可观测性 | 无中间过程 | **SSE 实时推送工具调用轨迹** |
+
+### 组件
+
+| 组件 | 职责 |
+|---|---|
+| `agent/QcAgentTools.java` | 工具集（**全部只读**，**不含任何埋点代码**） |
+| `agent/QcAnalysisAgent.java` | Agent 接口 + SystemMessage（含"禁止臆测"约束） |
+| `agent/AgentFactory.java` | Agent 工厂 —— 每次请求创建一个实例 |
+| `agent/AgentTraceListener.java` | 工具执行**完成**钩子 → 推送 SSE |
+| `agent/AgentTraceContext.java` | SSE 事件发送工具（无状态） |
+| `config/qc/QcAgentConfig.java` | 按 profile 装配，注册两个轨迹钩子 |
+| `controller/qc/QcAgentController.java` | HTTP 入口 |
+
+### 可用工具（全部只读）
+
+| 工具 | 底层方法 | 用途 |
+|---|---|---|
+| `getReportByNo(reportNo)` | `QcReportService.getByReportNo` | 按业务编号（`R2026…`）换数字 ID |
+| `getReport(reportId)` | `QcReportService.getById` | 报告背景 |
+| `getDefects(reportId)` | `QcDefectService.getByReportId` | 缺陷构成 |
+| `searchKnowledge(question)` | `RagService.retrieve` | 检索质量标准（只给素材，不让它二次生成） |
+
+> ⚠️ **安全边界**：`deleteReport` / `updateStatus` / `confirmDefect` **一律不暴露** ——
+> 即使被提示词注入，模型也只能读不能改。
+
+### 模型选择（Agent 需要 Function Calling）
+
+| profile | Agent 用的模型 |
+|---|---|
+| `ollama` | `ollama.agent-model`（默认 `llama3.1`）—— `deepseek-r1` 是推理模型，工具调用能力弱 |
+| `cloud` | `cloud-ai.chat.model`（`deepseek-chat`，原生支持 Function Calling） |
+
+### 轨迹埋点（零侵入，不碰工具代码）
+
+用 `AiServices` 的两个**官方钩子**：
+
+```java
+AiServices.builder(QcAnalysisAgent.class)
+        .chatModel(model)
+        .tools(tools)
+        .beforeToolExecution(b -> { ... })                   // 工具开始执行
+        .registerListener(new AgentTraceListener(emitter))   // 工具执行完成（含结果）
+        .build();
+```
+
+**emitter 怎么传** —— `AgentFactory` + **闭包捕获**（每次请求建一个 Agent 实例）：
+
+```java
+@Bean
+public AgentFactory cloudAgentFactory(QcAgentTools tools) {
+    ChatModel model = ...;                                // 模型只建一次
+    return emitter -> buildAgent(model, tools, emitter);  // 闭包捕获 emitter
+}
+```
+
+**为什么不用 ThreadLocal**：`executeToolsConcurrently()` 或流式模型下工具可能在别的线程执行，
+ThreadLocal 会**静默失效**（无报错，最难排查）。
+
+### 实测日志
+
+```
+[Tool] getReportByNo(reportNo=R20260811001)   ← 模型决定先换 ID
+[Tool] getReportByNo 完成
+[Tool] getReport(reportId=10)                 ← 拿到 ID=10，继续
+[Tool] getDefects(reportId=10)
+[Tool] getReport 完成
+[Tool] getDefects 完成
+Agent 流式分析完成，耗时 5215 ms
+```
+
+**判断标准**：`[Tool]` 出现多条且顺序不固定 = 模型在自主决策 ✅
 
 ---
 

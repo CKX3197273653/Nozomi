@@ -36,6 +36,10 @@ public class RagServiceImpl implements RagService {
     //调用模型回答
     @Autowired
     private ChatModelFactory chatModelFactory;
+    @Autowired
+    private HybridRetriever hybridRetriever;
+    @Autowired
+    private LuceneIndexer luceneIndexer;
     private final RagProperties ragProperties;
 
     public RagServiceImpl(RagProperties ragProperties) {
@@ -70,6 +74,7 @@ public class RagServiceImpl implements RagService {
                 .split(document);
         List<Embedding> embeddings = embeddingModel.embedAll(segments).content();
         embeddingStore.addAll(embeddings, segments);
+        luceneIndexer.addAll(segments);
     }
     //按 markdown 二级标题切分,保证一个chunk只讲一个主题   长字段按照字符兜底切分
     private List<TextSegment> splitByHeading(Document document) {
@@ -123,24 +128,36 @@ public class RagServiceImpl implements RagService {
     }
 
     @Override
-    public void clearKnowledgeBase() {
-        embeddingStore.removeAll();
+    public String retrieve(String question) {
+        //混合检索(向量 + 关键词 + RRF融合)
+        List<String> hits = hybridRetriever.retrieve(question);
+        if (hits == null || hits.isEmpty()) {
+            return null;
+        }
+        return String.join("\n\n", hits);
     }
 
     @Override
-    public String retrieve(String question) {
-        Embedding queryEmbedding = embeddingModel.embed(question).content();
-        EmbeddingSearchRequest request = EmbeddingSearchRequest.builder()
-                .queryEmbedding(queryEmbedding)
-                .maxResults(ragProperties.getTopk())
-                .build();
+    public String qcAsk(String question) {
+        String context = retrieve(question);
+        String prompt = """
+                你是一个专业的质量检测助手，请根据以下知识回答问题。
+                
+                %s
+                
+                问题：%s
+                
+                如果信息中没有相关内容，请直接回答，不要编造。
+                """.formatted(
+                (context == null || context.isEmpty()) ? "（无相关参考资料）" : context,
+                question);
 
-        List<EmbeddingMatch<TextSegment>> matches = embeddingStore.search(request).matches();
-        if (matches.isEmpty()) {
-            return null;
-        }
-        return matches.stream()
-                .map(m -> m.embedded().text())
-                .collect(Collectors.joining("\n\n"));
+        return chatModelFactory.getChatModel().chat(prompt);
+    }
+
+    @Override
+    public void clearKnowledgeBase() {
+        embeddingStore.removeAll();
+        luceneIndexer.clear();
     }
 }

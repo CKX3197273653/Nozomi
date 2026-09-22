@@ -4,11 +4,7 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.service.AiServices;
-import org.mate.mate10.agent.AgentFactory;
-import org.mate.mate10.agent.AgentTraceContext;
-import org.mate.mate10.agent.AgentTraceListener;
-import org.mate.mate10.agent.QcAgentTools;
-import org.mate.mate10.agent.QcAnalysisAgent;
+import org.mate.mate10.agent.*;
 import org.mate.mate10.config.CloudAiProperties;
 import org.mate.mate10.config.OllamaProperties;
 import org.springframework.context.annotation.Bean;
@@ -17,6 +13,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @Configuration
@@ -37,6 +34,7 @@ public class QcAgentConfig {
         ChatModel model = OllamaChatModel.builder()
                 .baseUrl(ollamaProperties.getBaseUrl())
                 .modelName(ollamaProperties.getAgentModel())
+                .listeners(List.of(new TokenUsageListener()))
                 .build();
         return emitter -> buildAgent(model, tools, emitter);
     }
@@ -48,6 +46,7 @@ public class QcAgentConfig {
                 .baseUrl(cloudAiProperties.getChat().getBaseUrl())
                 .apiKey(cloudAiProperties.getChat().getApiKey())
                 .modelName(cloudAiProperties.getChat().getModel())
+                .listeners(List.of(new TokenUsageListener()))
                 .build();
         return emitter -> buildAgent(model, tools, emitter);
     }

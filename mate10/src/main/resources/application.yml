@@ -34,6 +34,8 @@ app:
     chunk-size: 512
     chunk-overlap: 128
     use-heading-split: true
+    hybrid-enabled: true
+    lucene-dir: ./data/lucene-index
   chat:
     max-history-messages: 10
     max-history-chars: 2000
@@ -51,5 +53,8 @@ management:
     metrics:
       export:
         enabled: true
+
+
+
 
 

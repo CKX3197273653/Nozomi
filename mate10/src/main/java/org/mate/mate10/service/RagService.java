@@ -10,4 +10,5 @@ public interface RagService {
     String ask(String question);
     void clearKnowledgeBase();
     String retrieve(String question);
+    String qcAsk(String question);
 }

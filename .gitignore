@@ -32,6 +32,10 @@ uploads/
 *.xls
 *.xlsx
 
+# Lucene 索引（混合检索用，本地生成的构建产物）
+data/
+mate10/data/
+
 # Opencode
 .opencode/
 opencode.json

@@ -8,8 +8,6 @@
 - **`mate10-V/`** — Vue 3 + Vite 前端（Node.js）
 - **`milvus/`** — 空目录（历史遗留），Milvus 实际用 Docker 部署
 
-> 根目录旧 `.zip` 归档已废弃，不要依赖（且未被 git 跟踪，可自行清理）。
-
 ---
 
 ## 后端 `mate10/`
@@ -17,7 +15,7 @@
 ### 环境要求
 
 - JDK 17（本机 `JAVA_HOME=I:\JAVAgen`）
-- Maven 3.8+（本机无全局 mvn，使用 IDEA 内置 Maven：
+- Maven 3.8+（使用 IDEA 内置 Maven：
   `I:\IDEA\IntelliJ IDEA 2023.3.3\plugins\maven\lib\maven3\bin\mvn.cmd`）
 
 ## 生产部署环境变量清单
@@ -167,16 +165,26 @@ mysql -uroot -proot -e "CREATE DATABASE IF NOT EXISTS mate10db \
 
 ### 质检分析 Agent（LangChain4j `@Tool`，L1）
 
-**端点**：`POST /ai/qc-agent`，body `{"question": "分析 R20260808001 的根因"}`
+**端点**：
+
+| 端点 | 说明 | 响应格式 |
+|---|---|---|
+| `POST /ai/qc-agent` | 非流式，一次性返回结论 | `Result<String>` |
+| `POST /ai/qc-agent/stream` | **SSE 流式**，实时推送工具调用轨迹 + 结论 | `text/event-stream` |
+
+请求体统一为 `{"question": "分析 R20260808001 的根因"}`
 
 **与 L0 的区别**：`GET /api/qc/report/{id}/root-cause` 是**固定管道**（顺序写死在代码里）；
 Agent 则由**模型自主决定**调哪些工具、什么顺序 → 控制流从开发者转移到模型。
 
 | 组件 | 职责 |
 |---|---|
-| `agent/QcAgentTools.java` | 工具集（**全部只读**） |
+| `agent/QcAgentTools.java` | 工具集（**全部只读**，**不含任何埋点代码**） |
 | `agent/QcAnalysisAgent.java` | Agent 接口 + SystemMessage（含"禁止臆测"约束） |
-| `config/QcAgentConfig.java` | 按 profile 装配，直接构造 ChatModel 避免 Bean 歧义 |
+| `agent/AgentFactory.java` | **Agent 工厂** —— 每次请求创建一个 Agent 实例 |
+| `agent/AgentTraceListener.java` | 工具执行**完成**钩子 → 推送 SSE |
+| `agent/AgentTraceContext.java` | SSE 事件发送工具（无状态） |
+| `config/qc/QcAgentConfig.java` | 按 profile 装配，注册两个轨迹钩子 |
 | `controller/qc/QcAgentController.java` | HTTP 入口 |
 
 **可用工具**：
@@ -198,11 +206,54 @@ Agent 则由**模型自主决定**调哪些工具、什么顺序 → 控制流�
 | `ollama` | `ollama.agent-model`（默认 `llama3.1`） | ⚠️ `deepseek-r1` 是推理模型，工具调用能力弱，故**单独配一个字段** |
 | `cloud` | `cloud-ai.chat.model`（`deepseek-chat`） | ✅ 原生支持 Function Calling |
 
-**验证方式**：看日志里的 `[Tool]` 调用序列 —— 出现多条且顺序不固定 = 模型在自主决策 ✅
-（`QcAgentTools` 每个工具都打了 `log.info("[Tool] ...")`）
+**轨迹埋点机制（重要 —— 零侵入，不碰工具代码）**：
 
-> 💡 依赖：**零新增**。`langchain4j-core` 已含 `@Tool` / `@P`，
-> `langchain4j` 已含 `AiServices`，无需引入 LangGraph。
+用 `AiServices` 的两个**官方钩子**，`QcAgentTools` 一行都不用改：
+
+```java
+AiServices.builder(QcAnalysisAgent.class)
+        .chatModel(model)
+        .tools(tools)
+        .beforeToolExecution(b -> { ... })              // ← 工具开始执行
+        .registerListener(new AgentTraceListener(emitter))  // ← 工具执行完成（含结果）
+        .build();
+```
+
+**emitter 怎么传给钩子** —— **AgentFactory + 闭包捕获**（每次请求建一个 Agent 实例）：
+
+```java
+@Bean
+public AgentFactory cloudAgentFactory(QcAgentTools tools) {
+    ChatModel model = ...;                       // 模型只建一次 ✅
+    return emitter -> buildAgent(model, tools, emitter);   // 闭包捕获 emitter ✅
+}
+```
+
+为什么不用 ThreadLocal ⚠️：
+- `executeToolsConcurrently()` → 工具在**线程池**执行 → ThreadLocal **取不到**
+- 换成 `StreamingChatModel` → 事件回调可能在别的线程 → 同上
+- **而且是【静默失效】** —— 没有报错，最难排查
+
+为什么不用 `InvocationContext.methodArguments()` ⚠️：
+- 那是 LangChain4j **内部**用来找 `ChatMemory` 等托管类型的机制
+- 放自定义参数进去属于**未文档化行为**，升级版本可能失效
+
+**闭包方案的优势**：不依赖线程、不依赖框架内部机制、构建开销 ~1ms（Agent 本身跑数秒，可忽略）。
+
+**验证方式**：看日志里的 `[Tool]` 调用序列 —— 出现多条且顺序不固定 = 模型在自主决策 ✅
+
+```
+[Tool] getReportByNo(reportNo=R20260811001)   ← 工具开始（beforeToolExecution）
+[Tool] getReportByNo 完成                      ← 工具完成（AgentTraceListener）
+[Tool] getReport(reportId=10)                 ← 模型自己把编号换成了 ID ✅
+[Tool] getDefects(reportId=10)
+[Tool] getReport 完成
+[Tool] getDefects 完成
+Agent 流式分析完成，耗时 5215 ms
+```
+
+> 💡 依赖：**零新增**。`langchain4j-core` 已含 `@Tool` / `@P` / `ToolExecutedEventListener`，
+> `langchain4j` 已含 `AiServices`（含 `beforeToolExecution` / `registerListener`），无需引入 LangGraph。
 > 只有做**多 Agent 协作 / 人工审批断点**时才需要考虑图编排。
 
 ### 已知问题
@@ -263,6 +314,44 @@ Agent 则由**模型自主决定**调哪些工具、什么顺序 → 控制流�
   同类内部 `this.method()` 自调用不走 AOP 代理。
   如 `createFullReport` 内部调 `this.createReport()`，必须给**入口方法**也加注解。
 
+- **SSE 流式 + Spring Security 的异步派发坑（隐蔽）** ⚠️
+
+  **现象**：SSE 接口的数据**已正常返回**（前端也正常显示），
+  但日志紧跟一条 `AuthorizationDeniedException: Access Denied`
+
+  **根因**：
+
+  1. 请求进来 → Security 过滤（`dispatcherType = REQUEST`）→ 带 JWT 放行 ✅
+  2. 异步执行完 → `emitter.complete()` → Tomcat 触发 **ASYNC dispatch**
+  3. Spring Security 7 默认对**所有 dispatcherType** 做授权检查
+     → 异步线程里 `SecurityContext` 已清空
+     → `.anyRequest().authenticated()` → 拒绝 ❌
+
+  调用栈特征（用来辨认）：
+
+  ```
+  AsyncContextImpl$AsyncRunnable.run
+  ApplicationDispatcher.dispatch            ← 异步派发
+  AuthorizationFilter.doFilter              ← 授权拦截
+  ```
+
+  **解法**（1 行）：
+
+  ```java
+  .authorizeHttpRequests(auth -> auth
+          // 异步/错误派发不再重复授权（第 1 次 REQUEST 派发已用 JWT 检查过）
+          .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
+          .requestMatchers("/blocker/user/login", "/blocker/user/register").permitAll()
+          ...
+          .anyRequest().authenticated())
+  ```
+
+  需要 import `jakarta.servlet.DispatcherType`。
+
+  > ASYNC 派发**不是新请求** —— 它是同一个请求的延续，
+  > 第 1 次 REQUEST 派发时已经检查过了，放行它**不降低安全性**。
+  > `/ai/chat/stream` 也有同样问题，一并解决。
+
 - **无测试文件**：`src/test/java` 为空，无单元测试
 - **Swagger UI**：`http://localhost:8080/swagger-ui.html`（已放行匿名访问）
 
@@ -307,6 +396,14 @@ npm run preview   # 预览构建结果
 - **对话页面**：`views/qc/QA.vue`，`chatId` 首次发送时创建，会话存于组件状态（刷新即新会话）
 - **流式对话**：`api/chat.js` 的 `chatStream()` 用原生 `fetch` 绕过 axios 拦截器
   （SSE 响应是裸文本流，没有 `{code,msg,data}` 结构）
+- **质检 Agent 页面**：`views/qc/Agent.vue`（路由 `/agent`，菜单图标 `MagicStick`）
+  - 实时展示**工具调用轨迹**（`running` / `done` 卡片）+ 最终结论
+  - `api/agent.js` 的 `agentStream()` 同样用原生 `fetch`（SSE + 需要 `Authorization` 头）
+  - 事件类型：`start` / `tool` / `message` / `error` / `done`
+
+> ⚠️ **SSE 多行 data 必须用 `\n` 拼回**：后端 `message` 事件含换行的 Markdown，
+> 会被 SSE 规范拆成多个 `data:` 行。前端若直接拼接（`data += line`）会**丢掉换行**，
+> 结论会显示成一整行。正确做法见 `api/agent.js` 的 `dataLines.join('\n')`。
 
 ---
 

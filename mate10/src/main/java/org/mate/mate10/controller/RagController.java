@@ -56,7 +56,7 @@ public class RagController {
     public Result<String> qcAsk(@RequestBody String question) {
         String qcPrompt = "你是一个专业的质量检测助手，请根据以下知识回答问题。\n\n";
         String answer = ragService.ask(qcPrompt + question);
-        return Result.success(answer);
+        return Result.success(ragService.qcAsk(question));
     }
     //预设质检标准知识库
 //    @PostMapping("/init-qc-knowledge")

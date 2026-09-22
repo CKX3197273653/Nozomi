@@ -14,6 +14,7 @@
 | `/trend` | 趋势分析 | 按天/产线/批次缺陷趋势图表 |
 | `/visual3d` | 3D 可视化 | Three.js 工件三维模型 + 缺陷点渲染与交互 |
 | `/qa` | 知识问答 | RAG 质检助手对话、初始化知识库、上传知识文档 |
+| `/agent` | **质检 Agent** | 模型自主调用工具做根因分析，**实时展示工具调用轨迹** |
 
 整体为**智能质检分析平台**（深色背景 + 侧边菜单 + 顶栏），所有业务页共用主布局 `layout/index.vue`。
 
@@ -57,21 +58,23 @@ npm run preview
 server: {
   port: 5173,
   proxy: {
-    '/api': { target: 'http://localhost:8080', changeOrigin: true },
-    '/rag': { target: 'http://localhost:8080', changeOrigin: true }
+    '/blocker': { target: 'http://localhost:8080', changeOrigin: true },  // 登录/注册
+    '/api':     { target: 'http://localhost:8080', changeOrigin: true },  // QC 业务
+    '/rag':     { target: 'http://localhost:8080', changeOrigin: true },  // 知识库
+    '/ai':      { target: 'http://localhost:8080', changeOrigin: true }   // 对话 / 流式 / Agent
   }
 }
 ```
 
 > 后端另有 CORS 白名单，默认已放行 `http://localhost:5173`。
-> 注意：登录接口实际地址为 `/api/blocker/user/login`，若 `request.js` 的 `baseURL` 留空则请求会打到当前 Vite 源，再由代理转发到 8080。
+> `request.js` 的 `baseURL` 为空 → 请求走相对路径 → 由 Vite 代理转发到 8080。
 
 ## 目录结构
 
 ```
 mate10-v/
 ├── index.html
-├── vite.config.js        # 别名 @、依赖预构建、/api /rag 代理
+├── vite.config.js        # 别名 @、assetsInclude glb、/blocker /api /rag /ai 代理
 ├── package.json
 └── src/
     ├── main.js           # 入口：Pinia + Router + Element Plus + 全量图标注册
@@ -79,12 +82,19 @@ mate10-v/
     ├── style.css
     ├── api/
     │   ├── auth.js       # 登录
+    │   ├── chat.js       # 对话（含 chatStream：原生 fetch 流式）
+    │   ├── agent.js      # 质检 Agent 流式（agentStream：原生 fetch + SSE 解析）
     │   ├── qc.js         # 报告/缺陷/参数/统计/3D 接口
     │   └── rag.js        # 知识库问答接口
+    ├── components/
+    │   └── 3d/
+    │       └── ModelViewer.vue   # Three.js GLB 模型查看器
     ├── layout/
     │   └── index.vue     # 主布局（顶栏 + 侧边菜单 + 内容区）
     ├── router/
     │   └── index.js      # 路由 + 未登录跳转守卫
+    ├── stores/
+    │   └── user.js       # Pinia 用户状态
     ├── utils/
     │   └── request.js    # Axios 封装（token 注入 / 401 处理）
     └── views/
@@ -95,12 +105,20 @@ mate10-v/
             ├── Defect.vue
             ├── Trend.vue
             ├── Visual3D.vue
-            └── QA.vue
+            ├── QA.vue
+            └── Agent.vue      # 质检 Agent（工具调用轨迹实时展示）
 ```
 
 ## 说明
 
 - 路由使用 `createWebHistory`，生产环境部署需服务器配置 history 回退（如 Nginx `try_files`）。
 - 请求拦截器自动从 `localStorage` 读取 `token` 并写入 `Authorization: Bearer <token>`；响应 `401` 时清理登录态并跳转登录页。
-- 已知联调问题：前端登录请求 `/api/blocker/user/login` 带 `/api` 前缀，而后端实际映射为 `/blocker/user/login`（无前缀），`request.js` 的 `baseURL` 也为空；如登录 404，需统一两端的路径前缀。
+- **流式接口不走 axios**：`api/chat.js` 的 `chatStream()` 与 `api/agent.js` 的 `agentStream()`
+  用原生 `fetch` + `ReadableStream` —— 因为 SSE 响应是裸文本流（没有 `{code,msg,data}` 结构），
+  且 `EventSource` 无法携带 `Authorization` 头。
+
+> ⚠️ **SSE 多行 data 必须用 `\n` 拼回**：后端 `message` 事件含换行的 Markdown，
+> 会被 SSE 规范拆成多个 `data:` 行。若直接拼接（`data += line`）会**丢掉换行**，
+> 结论会显示成一整行。正确做法见 `api/agent.js` 的 `dataLines.join('\n')`。
+
 - 对应后端接口说明请见后端项目 [`../mate10/README.md`](../mate10/README.md)。
