@@ -5,6 +5,8 @@ import org.apache.pdfbox.Loader;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.mate.mate10.config.TesseractConfig;
 import org.mate.mate10.service.FileParseService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -101,6 +103,10 @@ public class FileParseServiceImpl implements FileParseService {
 
     //Word解析
     private String parseWord(String filePath) {
+        if (filePath.toLowerCase().endsWith(".docx")) {
+            return parseDocx(filePath);
+        }
+        //.doc格式
         try {
             HWPFDocument document = new HWPFDocument(new FileInputStream(filePath));
             WordExtractor extractor = new WordExtractor(document);
@@ -110,6 +116,17 @@ public class FileParseServiceImpl implements FileParseService {
             return text != null ? text : "";
         } catch (Exception e) {
             log.error("Word 解析失败: {}", filePath, e);
+            return "";
+        }
+    }
+    private String parseDocx(String filePath) {
+        try (XWPFDocument document = new XWPFDocument(new FileInputStream(filePath));
+             XWPFWordExtractor extractor = new XWPFWordExtractor(document)) {
+            String text = extractor.getText();
+            log.info("Word(.docx) 解析成功, 文字长度={}", text.length());
+            return text != null ? text : "";
+        }catch (Exception e) {
+            log.error("Word(.docx) 解析失败: {}", filePath, e);
             return "";
         }
     }
