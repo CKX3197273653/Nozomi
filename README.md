@@ -1,3 +1,4 @@
+<img width="1920" height="1080" alt="工具滚动" src="https://github.com/user-attachments/assets/9cd1548f-904a-47dd-908c-99d57a3b79bf" />
 # Mate10 · 智能质检分析平台
 
 ![CI](https://github.com/CKX3197273653/Nozomi/actions/workflows/ci.yml/badge.svg)
