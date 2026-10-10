@@ -18,8 +18,9 @@ spring:
           max-idle: 20
           min-idle: 5
       timeout: 3000ms
+      password: root
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: localhost:9094
 
 milvus:
   host: 127.0.0.1

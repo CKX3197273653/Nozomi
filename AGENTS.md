@@ -83,15 +83,26 @@ java -jar target/mate10-0.0.1-SNAPSHOT.jar
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
-| MySQL 8.0+ | 3306 | 业务/QC/聊天记录，默认库 `mate10db` |
-| MongoDB 4.0+ | 27017 | 聊天消息 |
-| Redis 6.0+ | 6379 | 缓存 |
-| Kafka 4.1（KRaft 模式） | 9092 | 消息队列（无 Zookeeper） |
-| Milvus 2.x（Docker） | 19530 | 向量库（docker-compose：standalone + etcd + minio） |
+| MySQL 8.0（Docker） | 3306 | 业务/QC/聊天记录，默认库 `mate10db` |
+| MongoDB 6（Docker） | 27017 | 聊天消息 |
+| Redis 7（Docker） | 6379 | 缓存（`requirepass` 见 `deploy/.env` 的 `REDIS_PASSWORD`） |
+| Kafka 4.1（Docker，KRaft） | 宿主机 9094 / 容器内 9092 | 消息队列（无 Zookeeper） |
+| Milvus 2.x（Docker） | 19530 | 向量库（standalone + etcd + minio，独立容器组 `milvus-*`） |
 | Ollama | 11434 | 本地模型服务（仅 ollama 模式需要） |
 | Tesseract | - | OCR（图片质检需要） |
 
-启动顺序建议：MySQL → MongoDB → Redis → Kafka → Milvus → Ollama → 后端
+**中间件全部 Docker 化（2026-10-10 起）**，本机 Windows 服务 MySQL80 / MongoDB
+已设为「手动」、本机 Redis 进程已停，**不要再启动**（会抢端口）。
+
+```bash
+# 启动中间件（在 deploy 目录）
+docker compose up -d mysql mongo redis kafka
+```
+
+> Milvus 用另一套独立容器组（`milvus-standalone` / `milvus-etcd` / `milvus-minio`），
+> 不在 `deploy/docker-compose.yml` 内（compose 里的 milvus 定义是生产部署用的）。
+> 中间件密码等配置在 `deploy/.env`（已 gitignore，不提交）。
+> 拉镜像若失败，用 daocloud 前缀拉取后 tag：`docker pull docker.m.daocloud.io/library/mysql:8.0 && docker tag ...`。
 
 ### AI 模型切换（ollama / cloud 双 profile）
 
@@ -415,8 +426,14 @@ npm run preview   # 预览构建结果
 4. Milvus 用 Docker 部署（standalone + etcd + minio 三容器）；
    **Milvus 容器重启后集合回到未加载状态**，若问答报 SearchRequest failed，
    可用后端 API 或 REST 重新 load 集合
-5. **Kafka**（本机路径 `D:\Kafka\kafka_2.13-4.1.0`）：
-    - KRaft 模式（无 Zookeeper），配置文件 `config\server.properties`
+5. **Kafka**：
+    - **✅ 现状（2026-10-09 起）**：开发环境 Kafka 已迁移到 **Docker**
+      （`deploy/docker-compose.yml` 的 kafka 服务，Linux 容器），
+      本机 `D:\Kafka\kafka_2.13-4.1.0` 已退役、不要再启动。
+      本机后端连 `localhost:9094`（宿主机专用 listener），容器内连 `kafka:9092`。
+      迁移原因与配置见下方「根因升级与根治方案」。
+    - （历史）本机路径 `D:\Kafka\kafka_2.13-4.1.0`：
+      KRaft 模式（无 Zookeeper），配置文件 `config\server.properties`
     - 数据目录：`log.dirs=kraft-logs`、`metadata.log.dir=kraft-meta`（**两者都不能删**）
     - **格式化必须加 `--standalone`**：
       `bin\windows\kafka-storage.bat format --standalone -t <集群ID> -c config\server.properties`
@@ -448,6 +465,43 @@ npm run preview   # 预览构建结果
          彻底绕开 `__consumer_offsets` 的清理操作。
          代价：该 topic 不再压缩（多占少量磁盘），**生产环境不建议**。
 
+      ---
+
+      **🔍 2026-10-09 根因升级（上述三级解法未触及真因，已用 Docker 根治 ✅）**：
+
+      现象：启动即崩，`kafka-log-retention` 任务报
+      `FileSystemException: 另一个程序正在使用此文件` →
+      `Shutdown broker because all log dirs have failed`。
+
+      真正根因 —— **Windows 上 mmap 的惰性释放竞态**：
+
+      1. `log.cleaner.enable=false` 只禁用**日志压缩器**（管 compact 策略），
+         管不了 **Log Retention**（按 `retention.ms` 删段）——**两套独立机制** ⚠️
+      2. Retention 判断段是否过期必须读**段内最大时间戳**（存于 `.timeindex`），
+         这一读触发 mmap 打开该文件
+      3. 读完立即删段 rename —— Windows 不允许 rename 被 mmap 的文件，
+         而 Java `MappedByteBuffer` 的释放是异步的（等 GC）→ 间歇性撞锁
+      4. Kafka 将文件操作失败视为 log dir 硬件故障 → broker 整体停机
+         （Linux 无此问题：POSIX 允许 unmap 后立即重命名，
+         这也是 Kafka 官方不把 Windows 当生产平台的原因）
+
+      **特征识别**（再遇到可秒认）：
+      - 删除批次里 `.log` / `.index` 都成功，**总是 `.timeindex` 失败**
+      - 间歇性发作（取决于 GC 时机）；停机后手动改名立即成功
+        （锁只在 Kafka 运行期间存在）
+
+      **根治方案（已落地 ✅）**：Kafka 迁到 Docker（Linux 容器），
+      配置见 `deploy/docker-compose.yml`：
+      - 双 listener：容器内 `kafka:9092`、宿主机 `host.docker.internal:9094`
+        （`KAFKA_LISTENERS` / `KAFKA_ADVERTISED_LISTENERS` /
+        `KAFKA_LISTENER_SECURITY_PROTOCOL_MAP` 三处同步 + 端口映射 `127.0.0.1:9094:9094`）
+      - 宿主机 hosts 需加 `127.0.0.1 host.docker.internal`（需管理员），
+        否则后端报无法解析该主机名
+      - `application-dev.yml`：`bootstrap-servers: localhost:9094`
+      - **验证结果**：后端启动零 Kafka 报错；`chat-topic` / `qc-report-topic`
+        自动创建；`kafka-console-consumer` 消费到真实聊天消息 ✅
+      - 本机旧配置（`log.cleaner.enable=false` 等）随本机 Kafka 退役，不再使用
+
 6. 前端 `npm run build` 前必须确认后端已运行，否则代理不可用
 7. 数据库表结构由 **Flyway 在启动时自动创建**（`db/migration/`），不要手工建表
 8. **改完代码必须重启后端再测**——否则测的是上一次编译的 class，结论不可信
@@ -458,11 +512,14 @@ npm run preview   # 预览构建结果
 
 新机器从零恢复项目的完整流程：
 
-1. **装环境**：JDK 17、Node.js 20.19+、MySQL、MongoDB、Redis、Kafka、Docker、Ollama、Tesseract
+1. **装环境**：JDK 17、Node.js 20.19+、**Docker Desktop**（中间件全容器化，无需本机装数据库）、Ollama、Tesseract
 2. **拉代码**：`git clone <仓库地址>`
-3. **初始化数据库**：建空库 `mate10db` 即可，表结构由 Flyway 启动时自动创建
+3. **初始化数据库**：无需手工建库——`deploy/.env` 配好密码后
+   `docker compose up -d mysql` 会自动创建 `mate10db` 空库，
+   表结构由 Flyway 启动时自动创建
 4. **拉模型**：`ollama pull deepseek-r1:latest`、`ollama pull all-minilm:latest`
-5. **启动中间件**：MySQL → MongoDB → Redis → Kafka → Milvus → Ollama
+5. **启动中间件**：`cd deploy && docker compose up -d mysql mongo redis kafka`
+   （Milvus 独立容器组另启；拉镜像失败用 daocloud 前缀 + tag）
 6. **配置后端**（IDEA）：
     - Active profiles：`ollama` 或 `cloud`
     - 环境变量：API 密钥（cloud）、`TESSERACT_PATH`（换机器必改）
@@ -470,8 +527,7 @@ npm run preview   # 预览构建结果
 8. **启动前端**：`cd mate10-V && npm install && npm run dev`
 9. **首次使用**：QA 界面"初始化质检知识库"（Milvus 集合自动创建）
 
-> 换环境必改项：`TESSERACT_PATH`、数据库密码（`application.yml` 中 root/root）、
-> Kafka 路径与 wmic 修复、Windows Defender 排除目录。
+> 换环境必改项：`TESSERACT_PATH`、`deploy/.env`（中间件密码，本机为 root/root）。
 
 ### Docker 部署注意
 
