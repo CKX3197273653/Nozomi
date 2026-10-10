@@ -5,9 +5,12 @@
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0-brightgreen)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883)
 ![Docker](https://img.shields.io/badge/Docker-容器化-2496ED)
+![License](https://img.shields.io/github/license/CKX3197273653/Nozomi)
 
 > 面向制造业质检场景的全栈平台：**质检数据管理 + AI 对话助手 + RAG 知识库问答**。
 > 支持本地模型与云端模型一键切换，已完整容器化并在华为云验证部署。
+
+> 本项目采用 [MIT License](LICENSE) 开源，允许学习、二次开发与商业化使用（需保留版权说明）。
 
 ---
 
@@ -86,7 +89,7 @@
 |---|---|
 | **RAG 检索优化** | 通过分块策略调优，检索命中率 **86.7% → 96.7%**（附完整实验记录） |
 | **流式输出** | SSE + 独立线程池 + `try/finally` 保证 `done` 事件；前端用 `fetch` + `ReadableStream` 绕过 EventSource 的鉴权限制 |
-| **Agent 化（L0 → L1）** | 把质检查询封装为 `@Tool`，**控制流从开发者转移到模型**；用 `beforeToolExecution` + `ToolExecutedEventListener` 做**零侵入**轨迹埋点（工具代码一行不改），SSE 实时展示调用过程 |
+| **Agent 化（L0 → L1）** | 把质检查询封装为 `@Tool`，**控制流从开发者转移到模型**；用 `beforeToolExecution` + `ToolExecutedEventListener` 做**零侵入**轨迹埋点（可扩展） |
 | **安全加固** | 方法级权限（`@PreAuthorize`）替代前端传参判断；JWT 密钥强度启动校验；密码字段 `WRITE_ONLY` 防泄露 |
 | **配置外部化** | 双维度 Profile（环境 `dev/prod` × AI `ollama/cloud`，共 4 种组合）；生产配置**刻意无默认值**，缺失即 fail-fast |
 | **测试与 CI** | 13 个单元测试（覆盖上下文组装、JWT 安全不变量、登录分支）；GitHub Actions 自动验证 |
