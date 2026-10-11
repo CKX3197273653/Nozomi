@@ -305,10 +305,12 @@ Agent 流式分析完成，耗时 5215 ms
   都**静默失败** —— 无异常、无报错，但 Redis 里的 key 没删；
   `evict(key)`（DEL）和 `KEYS + DELETE` 则正常。
 
-  排查过程（两个假想敌，一次锁定）：
+  排查过程（三个假想敌，一次锁定）：
   ① 怀疑组合注解 `@EvictQcCache`（元注解 @CacheEvict）没被识别 → 换成直接 `@CacheEvict` 仍失效，排除
   ② 怀疑 `transactionAware()` 把 clear 延迟到事务提交 → 注释掉仍失效，排除（现已恢复）
-  ③ 最小化对比：手动 `evict(key)` ✅ vs 手动 `clear()` ❌ → 锁定 `clear()` 的 SCAN 清空路径
+  ③ 最小化对比：手动 `evict(key)` ✅ vs 手动 `clear()` ❌ → 锁定 `clear()`（清空）路径
+  ④ 试过显式切换 `BatchStrategies.scan(1000)` SCAN 批处理策略 → 仍失效，排除批处理策略层
+     （官方文档默认就是 KEYS+DEL 批处理策略，KEYS/SCAN 两种都试过，`clear()` 都静默失败）
 
   **工作区**：改用 `StringRedisTemplate.keys(pattern)` + `delete(keys)` 手动清
   （`QcReportServiceImpl.evictQcCache()` 已改）。

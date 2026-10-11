@@ -234,7 +234,7 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
         return ok;
     }
     private void evictQcCache() {
-        // clear() 在 Spring Data Redis 4.0 有 bug（SCAN 清空静默失败），改用 KEYS + DEL
+        // clear() 在 Spring Data Redis 4.0 有 bug（KEYS/SCAN 两种批处理策略的 clear 都静默失败），改用 KEYS + DEL
         deleteByPattern("qcStats::*");
         deleteByPattern("qcDetail::*");
     }
