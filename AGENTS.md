@@ -312,10 +312,13 @@ Agent 流式分析完成，耗时 5215 ms
   ④ 试过显式切换 `BatchStrategies.scan(1000)` SCAN 批处理策略 → 仍失效，排除批处理策略层
      （官方文档默认就是 KEYS+DEL 批处理策略，KEYS/SCAN 两种都试过，`clear()` 都静默失败）
 
-  **工作区**：改用 `StringRedisTemplate.keys(pattern)` + `delete(keys)` 手动清
-  （`QcReportServiceImpl.evictQcCache()` 已改）。
+  **根因与修复**：Spring Data Redis 3.x+ 默认的 `RedisCacheWriter` 是**批量写入**，
+  `clear()` 的批量操作没同步刷到 Redis → 静默失败；`evict(key)` 单条 DEL 走即时路径所以正常。
+  **修复**：`RedisConfig` 改用
+  `RedisCacheWriter.create(connectionFactory, b -> b.immediateWrites())`
+  → 所有写入（含 clear）立即同步执行 → 恢复正常（KEYS+DEL 工作区已移除）。
   ⚠️ 其余 Service（`QcDefectServiceImpl` / `QcProductionParamServiceImpl`）的
-  `@EvictQcCache` 同样失效，**待同样处理**。
+  `@EvictQcCache` 之前同样失效，immediateWrites 修复后应已恢复，可抽查验证。
 
   > 方法论：这是「集成测试（真 Redis）才能抓到的 bug」—— 单测 mock 掉缓存，
   > 永远测不出「清空失效」。`QcReportCacheIntegrationTest` 就是为它而生的。

@@ -21,14 +21,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 @Slf4j
 @Service
@@ -49,8 +47,6 @@ public class QcReportServiceImpl implements QcReportService {
     private ChatModelFactory chatModelFactory;
     @Autowired
     private CacheManager cacheManager;
-    @Autowired
-    private StringRedisTemplate stringRedisTemplate;
 
     @Override
     @Transactional  // 事务：三个操作要么都成功，要么都失败
@@ -234,16 +230,9 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
         return ok;
     }
     private void evictQcCache() {
-        // clear() 在 Spring Data Redis 4.0 有 bug（KEYS/SCAN 两种批处理策略的 clear 都静默失败），改用 KEYS + DEL
-        deleteByPattern("qcStats::*");
-        deleteByPattern("qcDetail::*");
-    }
-
-    private void deleteByPattern(String pattern) {
-        Set<String> keys = stringRedisTemplate.keys(pattern);
-        if (keys != null && !keys.isEmpty()) {
-            stringRedisTemplate.delete(keys);
-        }
+        // RedisConfig 配了 immediateWrites，clear() 会立即同步执行
+        cacheManager.getCache("qcStats").clear();
+        cacheManager.getCache("qcDetail").clear();
     }
     @Override
     @Cacheable(cacheNames="qcDetail", key="'report:' + #id", unless = "#result == null ")

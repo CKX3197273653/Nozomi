@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
 import org.springframework.data.redis.cache.RedisCacheManager;
+import org.springframework.data.redis.cache.RedisCacheWriter;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.GenericJacksonJsonRedisSerializer;
@@ -63,7 +64,12 @@ public class RedisConfig {
                 "qcDetail", config.entryTtl(Duration.ofMinutes(30))
         );
 
-        return RedisCacheManager.builder(connectionFactory)
+        // immediateWrites：强制所有缓存写入（含 clear）立即同步执行，
+        // 修复 Spring Data Redis 4.0 默认批量写入导致 clear() 静默失效
+        RedisCacheWriter cacheWriter = RedisCacheWriter.create(connectionFactory,
+                builder -> builder.immediateWrites());
+
+        return RedisCacheManager.builder(cacheWriter)
                 .cacheDefaults(config)
                 .withInitialCacheConfigurations(initialCaches)
                 .transactionAware()
