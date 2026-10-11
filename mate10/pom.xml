@@ -49,6 +49,19 @@
         <JJTest>1.21.4</JJTest>
 
     </properties>
+    <dependencyManagement>
+        <dependencies>
+            <!-- 统一所有 spring-framework 模块版本，避免 spring-webmvc 与其他模块错配（ApiVersionHolder NoClassDefFoundError） -->
+            <dependency>
+                <groupId>org.springframework</groupId>
+                <artifactId>spring-framework-bom</artifactId>
+                <version>7.0.8</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
     <dependencies>
         <!-- 安全 -->
         <dependency>
@@ -290,11 +303,6 @@
             <groupId>org.apache.lucene</groupId>
             <artifactId>lucene-queryparser</artifactId>
             <version>${HHJS}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework</groupId>
-            <artifactId>spring-webmvc</artifactId>
-            <version>7.0.8</version>
         </dependency>
         <dependency>
             <groupId>org.flywaydb</groupId>
