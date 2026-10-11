@@ -299,6 +299,25 @@ Agent 流式分析完成，耗时 5215 ms
 
 ### 已知问题
 
+- **Spring Data Redis 4.0 的 `RedisCache.clear()`（清空）失效（重要，集成测试抓到的框架 bug）** ⚠️
+
+  现象：`@CacheEvict(allEntries=true)` 和手动 `cacheManager.getCache("qcDetail").clear()`
+  都**静默失败** —— 无异常、无报错，但 Redis 里的 key 没删；
+  `evict(key)`（DEL）和 `KEYS + DELETE` 则正常。
+
+  排查过程（两个假想敌，一次锁定）：
+  ① 怀疑组合注解 `@EvictQcCache`（元注解 @CacheEvict）没被识别 → 换成直接 `@CacheEvict` 仍失效，排除
+  ② 怀疑 `transactionAware()` 把 clear 延迟到事务提交 → 注释掉仍失效，排除（现已恢复）
+  ③ 最小化对比：手动 `evict(key)` ✅ vs 手动 `clear()` ❌ → 锁定 `clear()` 的 SCAN 清空路径
+
+  **工作区**：改用 `StringRedisTemplate.keys(pattern)` + `delete(keys)` 手动清
+  （`QcReportServiceImpl.evictQcCache()` 已改）。
+  ⚠️ 其余 Service（`QcDefectServiceImpl` / `QcProductionParamServiceImpl`）的
+  `@EvictQcCache` 同样失效，**待同样处理**。
+
+  > 方法论：这是「集成测试（真 Redis）才能抓到的 bug」—— 单测 mock 掉缓存，
+  > 永远测不出「清空失效」。`QcReportCacheIntegrationTest` 就是为它而生的。
+
 - **`onnxruntime` 原生库 + GraalVM 不兼容（重要，排查了四个假想敌才定位）** ⚠️
 
   Rerank 的 ONNX 原生库在 GraalVM 下报错：
