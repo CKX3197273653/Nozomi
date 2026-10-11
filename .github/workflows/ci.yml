@@ -25,8 +25,8 @@
             distribution: 'temurin'
             cache: maven                       # 缓存 Maven 依赖，第二次跑快很多
 
-        - name: 编译并运行单元测试
-          run: mvn -B clean test
+        - name: 编译并运行单元测试（跳过集成测试，集成测试需 Docker + 本地中间件）
+          run: mvn -B clean test -DexcludedGroups=integration
 
     # ==================== 前端 ====================
     frontend:

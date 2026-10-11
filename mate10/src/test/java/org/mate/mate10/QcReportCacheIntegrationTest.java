@@ -1,6 +1,7 @@
 package org.mate.mate10;
 
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mate.mate10.entity.qc.QcReport;
 import org.mate.mate10.service.qc.QcReportService;
@@ -19,6 +20,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@Tag("integration")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @ActiveProfiles({"dev", "ollama", "test"})
 @TestPropertySource(properties = "JWT_SECRET_KEY=integration-test-secret-key-0123456789abcdef")
