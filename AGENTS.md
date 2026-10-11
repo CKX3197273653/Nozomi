@@ -14,7 +14,9 @@
 
 ### 环境要求
 
-- JDK 17（本机 `JAVA_HOME=I:\JAVAgen`）
+- JDK 17 = **Microsoft Build of OpenJDK 17**（本机 `JAVA_HOME=I:\JAVAgen`）
+  > ⚠️ **不能用 GraalVM**：Rerank 依赖的 `onnxruntime` 原生库在 GraalVM 的 `jvmci` 编译器下会报
+  > `DLL初始化例程失败` / 崩溃，必须用标准 OpenJDK（HotSpot/C2）。详见「已知问题」。
 - Maven 3.8+（使用 IDEA 内置 Maven：
   `I:\IDEA\IntelliJ IDEA 2023.3.3\plugins\maven\lib\maven3\bin\mvn.cmd`）
 
@@ -154,6 +156,8 @@ mysql -uroot -proot -e "CREATE DATABASE IF NOT EXISTS mate10db \
 - `application.yml` — 所有中间件连接配置、profile 切换、双集合维度配置
 - Tesseract、JWT 密钥均已外部化为环境变量（见上表）
 - **JWT 有效期 7 天**：过期后接口返回 401（`SecurityConfig` 已配置 `AuthenticationEntryPoint`）
+- **Rerank 模型路径**：`app.rag.rerank.*`（默认 `model-path=D:/AIGC/bge-reranker-base/onnx/model.onnx`，
+  可用 `RERANK_MODEL_PATH` / `RERANK_TOKENIZER_PATH` 环境变量覆盖；模型文件不在 git，需从 ModelScope 下载）
 
 ### 监控端点（Actuator + Prometheus）
 
@@ -267,7 +271,51 @@ Agent 流式分析完成，耗时 5215 ms
 > `langchain4j` 已含 `AiServices`（含 `beforeToolExecution` / `registerListener`），无需引入 LangGraph。
 > 只有做**多 Agent 协作 / 人工审批断点**时才需要考虑图编排。
 
+### RAG 重排（Cross-Encoder Rerank）
+
+混合检索（向量 + BM25 → 融合）之后，再加一层 **cross-encoder 精排**，把召回结果重排到 Top-K。
+
+**链路**：召回 topK × `recall-factor` → 按文本去重 → `CrossEncoderReranker`（bge-reranker-base）精排 → Top-K
+
+| 组件 | 职责 |
+|---|---|
+| `service/Reranker.java` | 重排接口（`rerank(query, candidates, topK)`） |
+| `service/Impl/CrossEncoderReranker.java` | 包装 LangChain4j `OnnxScoringModel`（bge-reranker-base，`scoreAll` 批量打分） |
+| `HybridRetriever` | 多召回 + 去重 + 调 reranker（`@Autowired(required=false)`，Bean 不存在时回退 RRF） |
+
+**依赖**：`langchain4j-onnx-scoring:1.14.1-beta24`（传递引入 `onnxruntime:1.22.0` + DJL `tokenizers`）
+
+**模型**：`bge-reranker-base`（int8 量化 266MB + `tokenizer.json` 16MB），放 `D:/AIGC/bge-reranker-base/`。
+下载用 **ModelScope**（hf-mirror 本机连不上）：
+`https://modelscope.cn/api/v1/models/Xenova/bge-reranker-base/repo?Revision=master&FilePath=onnx/model_quantized.onnx`
+
+**配置**（`application.yml` → `app.rag.rerank`）：
+`enabled` / `model-path` / `tokenizer-path` / `recall-factor`（默认 3）/ `max-length`（默认 510）
+
+**开关**：`enabled=false` 时 `CrossEncoderReranker` Bean 不创建（`@ConditionalOnProperty`），
+`HybridRetriever` 自动回退到 RRF 融合。
+
+**验证**：启动日志出现 `[Rerank] Cross-Encoder 加载完成`；检索时出现 `[Hybrid] 召回 xx 条 → 去重 xx 条 → 重排取 xx 条`。
+
 ### 已知问题
+
+- **`onnxruntime` 原生库 + GraalVM 不兼容（重要，排查了四个假想敌才定位）** ⚠️
+
+  Rerank 的 ONNX 原生库在 GraalVM 下报错：
+  - onnxruntime 1.22.0 → `UnsatisfiedLinkError: DLL初始化例程失败`
+  - onnxruntime 1.31.0 → `EXCEPTION_ACCESS_VIOLATION`（崩在 `msvcp140.dll`）
+
+  **真凶是 GraalVM 的 `jvmci` 编译器**，不是系统 DLL、不是 VC++ 运行库、不是版本。
+  **解法**：换成标准 OpenJDK（Microsoft Build of OpenJDK 17，HotSpot/C2）→ 正常。
+
+  排查过程（四个假想敌，记录方法论）：
+  ① 怀疑缺 VC++ 运行库 → 查 `msvcp140.dll` 齐全，排除
+  ② 怀疑撞 Win11 24H2 系统 `onnxruntime.dll` → 重命名后仍失败，排除（现已恢复）
+  ③ 怀疑版本太新崩溃 → 换 1.31.0 表现不同但都不行
+  ④ **最小化实验对比 JVM** → 写 `OrtEnvironment.getEnvironment()` 最小 main，
+     分别用 GraalVM / OpenJDK 跑 → OpenJDK 成功、GraalVM 失败 → 锁定 ✅
+
+  > 方法论：遇到「玄学」原生库问题，写个最小 main 分别用不同 JVM 跑，一分钟二分定位，别瞎猜。
 
 - **Spring Boot 4.0 模块化陷阱（重要）**：SB 4.0 把自动配置拆成了独立模块，
   加中间件需要「**库 + 集成层**」两件套。只加库会**静默失效** ——
@@ -512,12 +560,14 @@ npm run preview   # 预览构建结果
 
 新机器从零恢复项目的完整流程：
 
-1. **装环境**：JDK 17、Node.js 20.19+、**Docker Desktop**（中间件全容器化，无需本机装数据库）、Ollama、Tesseract
+1. **装环境**：JDK 17（**Microsoft Build of OpenJDK，不能用 GraalVM**，见「已知问题」）、Node.js 20.19+、**Docker Desktop**（中间件全容器化，无需本机装数据库）、Ollama、Tesseract
 2. **拉代码**：`git clone <仓库地址>`
 3. **初始化数据库**：无需手工建库——`deploy/.env` 配好密码后
    `docker compose up -d mysql` 会自动创建 `mate10db` 空库，
    表结构由 Flyway 启动时自动创建
 4. **拉模型**：`ollama pull deepseek-r1:latest`、`ollama pull all-minilm:latest`
+   （Rerank 模型另下：从 ModelScope 下 `bge-reranker-base` 的 `onnx/model_quantized.onnx` + `tokenizer.json`
+   到 `D:/AIGC/bge-reranker-base/`，见「RAG 重排」章节）
 5. **启动中间件**：`cd deploy && docker compose up -d mysql mongo redis kafka`
    （Milvus 独立容器组另启；拉镜像失败用 daocloud 前缀 + tag）
 6. **配置后端**（IDEA）：
@@ -527,7 +577,7 @@ npm run preview   # 预览构建结果
 8. **启动前端**：`cd mate10-V && npm install && npm run dev`
 9. **首次使用**：QA 界面"初始化质检知识库"（Milvus 集合自动创建）
 
-> 换环境必改项：`TESSERACT_PATH`、`deploy/.env`（中间件密码，本机为 root/root）。
+> 换环境必改项：`TESSERACT_PATH`、`RERANK_MODEL_PATH`、`deploy/.env`（中间件密码，本机为 root/root）。
 
 ### Docker 部署注意
 

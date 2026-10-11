@@ -36,6 +36,12 @@ app:
     use-heading-split: true
     hybrid-enabled: true
     lucene-dir: ./data/lucene-index
+    rerank:
+      enabled: true
+      model-path: ${RERANK_MODEL_PATH:D:/AIGC/bge-reranker-base/onnx/model.onnx}
+      tokenizer-path: ${RERANK_TOKENIZER_PATH:D:/AIGC/bge-reranker-base/tokenizer.json}
+      recall-factor: 3
+      max-length: 510
   chat:
     max-history-messages: 10
     max-history-chars: 2000

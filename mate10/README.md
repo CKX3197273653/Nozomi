@@ -789,6 +789,44 @@ Agent 流式分析完成，耗时 5215 ms
 
 ---
 
+## RAG 重排（Cross-Encoder Rerank）
+
+混合检索（向量 + BM25 → 融合）之后，再加一层 **cross-encoder 精排**，
+用「更慢但更准」的模型把召回结果重排到 Top-K。
+
+### 链路
+
+```
+召回 topK × 3 → 按文本去重 → CrossEncoderReranker（bge-reranker-base）精排 → Top-K
+```
+
+### 组件
+
+| 组件 | 职责 |
+|---|---|
+| `service/Reranker.java` | 重排接口（`rerank(query, candidates, topK)`） |
+| `service/Impl/CrossEncoderReranker.java` | 包装 LangChain4j `OnnxScoringModel`（bge-reranker-base） |
+| `HybridRetriever` | 多召回 + 去重 + 调 reranker（Bean 不存在时回退 RRF） |
+
+### 依赖与模型
+
+- 依赖：`langchain4j-onnx-scoring`（传递引入 `onnxruntime` + DJL `tokenizers`）
+- 模型：`bge-reranker-base`（int8 量化 266MB + `tokenizer.json`），放 `D:/AIGC/bge-reranker-base/`，
+  从 ModelScope 下载（hf-mirror 本机连不上）
+- 配置：`app.rag.rerank.enabled`（开关）/ `model-path` / `tokenizer-path` / `recall-factor`（默认 3）/ `max-length`
+
+### 效果（A/B 对比，30 题评测集）
+
+| | Rerank 关（RRF） | Rerank 开（Cross-Encoder） |
+|---|---|---|
+| 命中率 | 96.7%（29/30） | **100.0%（30/30）** |
+| 耗时 | 8.1s | 145.3s（CPU 推理） |
+
+> **经典权衡**：cross-encoder 用「延迟换精度」。它只对召回后的 Top-N 精排，不全量重排，
+> 所以是「最后一道精排」。未来优化方向：GPU 推理 / 减小精排候选数 / 批处理缓存。
+
+---
+
 ## 性能压测实验
 
 > 2026-10 使用 JMeter 5.6.3 对核心接口进行的系统性压测。
@@ -844,9 +882,6 @@ Agent 流式分析完成，耗时 5215 ms
   Word / Excel 解析方法为预留（返回空串），上传 Word/Excel 时 AI 无法提取内容。
 - **上传文件清理**：质检报告文件保存在运行目录 `uploads/qc/`（相对路径），
   部署时需注意目录挂载与磁盘清理策略。
-- **重排序（Rerank）**：混合检索（向量 + BM25 + RRF）已落地，
-  但尚未接入 Rerank 重排序 —— 知识库规模继续增长时，这是下一步优化方向
-  （详见 `RAG检索优化实验记录.md`）。
 
 ### 设计说明（非缺陷）
 
@@ -861,9 +896,9 @@ Agent 流式分析完成，耗时 5215 ms
   读用 `@Cacheable`、写用 `@EvictQcCache` 组合注解（粗粒度失效，避免漏清）。
   缓存序列化用 `GenericJacksonJsonRedisSerializer.builder().enableDefaultTyping(...)`
   —— 必须写 `@class`，否则反序列化会退化成 `LinkedHashMap`。
-- **混合检索**：向量（语义）+ Lucene BM25（精确标识符）→ RRF 融合。
+- **混合检索 + 重排**：向量（语义）+ Lucene BM25（精确标识符）→ 按文本去重 → cross-encoder 精排。
   关键词索引持久化到 `./data/lucene-index`（与 Milvus 各自持久化），
-  可通过 `app.rag.hybrid-enabled` 关闭退回纯向量。
+  可通过 `app.rag.hybrid-enabled` 关闭退回纯向量；`app.rag.rerank.enabled` 关闭退回 RRF 融合。
 - **Profile 优先级**（从高到低）：
   `命令行参数` > `JVM 系统属性 (-D...)` > `操作系统环境变量` > `application.yml`
 

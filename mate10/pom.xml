@@ -27,6 +27,7 @@
         <langchain4j.version>1.14.1</langchain4j.version>
         <langchain4j-ollama.version>1.14.1</langchain4j-ollama.version>
         <langchain4j-milvus.version>1.14.1-beta24</langchain4j-milvus.version>
+        <langchain4j-onnx-scoring.version>1.14.1-beta24</langchain4j-onnx-scoring.version>
         <jredisearch.version>2.2.0</jredisearch.version>
         <ik-analyzer.version>9.0.0</ik-analyzer.version>
         <spring-boot-kafka.version>4.0.0</spring-boot-kafka.version>
@@ -206,6 +207,11 @@
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-milvus</artifactId>
             <version>${langchain4j-milvus.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-onnx-scoring</artifactId>
+            <version>${langchain4j-onnx-scoring.version}</version>
         </dependency>
         <!-- Redis Search客户端 -->
         <dependency>

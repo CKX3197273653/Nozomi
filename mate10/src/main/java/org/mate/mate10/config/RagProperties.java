@@ -22,5 +22,15 @@ public class RagProperties {
     private String luceneDir = "./data/lucene-index";
     //混合检索
     private boolean hybridEnabled = true;
+    //重排
+    private Rerank rerank = new Rerank();
 
+    @Data
+    public static class Rerank {
+        private boolean enabled = false;  //重排
+        private String modelPath = "";   //ONNX 模型文件路径
+        private String tokenizerPath = "";  //tokenizer.json 路径
+        private int recallFactor = 3;  //召回倍数,先召回 topK * recallFactor条件候选,再重排取 topK
+        private int maxLength = 510;   //最大token长度  (bge-reranker-base 默认510)
+    }
 }
