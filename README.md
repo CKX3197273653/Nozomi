@@ -23,7 +23,7 @@
 <img width="2560" height="1440" alt="23f01ae78866bfeb124e8543e6f2b897" src="https://github.com/user-attachments/assets/56b820ae-2071-4b1f-a50a-14d52e162bef" />
 <img width="2560" height="1440" alt="184db1f9d0daeb73e2b3fbd66e3623a1" src="https://github.com/user-attachments/assets/594dc200-86a8-4fa7-9c60-7c6840ef4c29" />
 <img width="2560" height="1440" alt="4fa1898ab93580eeb7de74dc3415818b" src="https://github.com/user-attachments/assets/cd3c6f24-5893-437b-a432-236cd899958a" />
-
+<img width="1920" height="1080" alt="工具滚动" src="https://github.com/user-attachments/assets/9cd1548f-904a-47dd-908c-99d57a3b79bf" />
 ---
 
 ## 核心功能
