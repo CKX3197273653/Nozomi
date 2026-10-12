@@ -1,4 +1,4 @@
-export async function agentStream(question, handlers = {}) {
+export async function agentStream(question,chatId,userId, handlers = {}) {
     const { onStart, onTool, onMessage, onError, onDone } = handlers
     const token = localStorage.getItem('token')
 
@@ -8,7 +8,7 @@ export async function agentStream(question, handlers = {}) {
             'Content-Type': 'application/json; charset=utf-8',
             'Authorization': 'Bearer ' + token
         },
-        body: JSON.stringify({ question })
+        body: JSON.stringify({ question, chatId, userId})
     })
 
     if (!resp.ok) {

@@ -13,5 +13,7 @@ public interface ChatMessageRepository extends MongoRepository<ChatMessageDocume
     List<ChatMessageDocument>findByUserId(Long userId);
     List<ChatMessageDocument>findByChatId(Long chatId);
     List<ChatMessageDocument>findByChatIdAndRole(Long chatId,String role);
-    List<ChatMessageDocument> findByChatIdOrderByCreateTimeDesc(Long chatId, Pageable pageable);
+    List<ChatMessageDocument>findByChatIdOrderByCreateTimeDesc(Long chatId, Pageable pageable);
+    List<ChatMessageDocument>findByReportNoOrderByCreateTimeDesc( String reportNo, Pageable pageable);
+
 }

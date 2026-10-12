@@ -23,4 +23,6 @@ public class ChatMessageDocument {
     private String content;
     @Field("create_time")
     private LocalDateTime createTime;
+    @Field("report_no")
+    private String reportNo;
 }

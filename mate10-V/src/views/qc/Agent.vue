@@ -2,6 +2,7 @@
 import { ref, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { agentStream } from '@/api/agent.js'
+import {createChat} from "@/api/chat.js";
 
 const question = ref('')
 const running = ref(false)
@@ -9,7 +10,25 @@ const steps = ref([])
 const answer = ref('')
 const errorMsg = ref('')
 const listRef = ref(null)
+const chatId = ref(null)
 
+const currentUserId = () => {
+  try {
+    return JSON.parse(localStorage.getItem('user') || '{}').id
+  } catch {
+    return null
+  }
+}
+const ensureChatId = async () => {
+  if (chatId.value) return chatId.value
+  const res = await createChat(currentUserId(), '质检分析')
+  chatId.value = res.data.id
+  return chatId.value
+}
+const handleNewChat = () => {
+  chatId.value = null
+  reset()
+}
 const statusText = (s) => ({ running: '调用中…', done: '完成', error: '失败' }[s] || s)
 const statusType = (s) => ({ running: 'warning', done: 'success', error: 'danger' }[s] || 'info')
 
@@ -26,7 +45,7 @@ function scrollToBottom() {
 }
 
 async function send() {
-  const q = question.value.trim()
+   const q = question.value.trim()
   if (!q) {
     ElMessage.warning('请输入问题')
     return
@@ -37,7 +56,8 @@ async function send() {
   running.value = true
 
   try {
-    await agentStream(q, {
+    const cid = await ensureChatId()
+    await agentStream(q, cid, currentUserId(), {
       onTool(payload) {
         if (payload.status === 'running') {
           steps.value.push({
@@ -93,6 +113,7 @@ async function send() {
       <el-button type="primary" :loading="running" @click="send">
         {{ running ? '分析中' : '开始分析' }}
       </el-button>
+      <el-button  type="primary" :disabled="running" @click="handleNewChat">新会话</el-button>
     </div>
 
     <!-- 轨迹区 -->

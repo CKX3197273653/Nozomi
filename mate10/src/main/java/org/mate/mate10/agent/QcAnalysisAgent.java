@@ -3,6 +3,7 @@ package org.mate.mate10.agent;
 
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.UserMessage;
+import dev.langchain4j.service.V;
 
 //质检根因分析 Agent接口
 public interface QcAnalysisAgent {
@@ -32,7 +33,11 @@ public interface QcAnalysisAgent {
           如果现有信息不足以判断，明确说明还缺什么数据
         
         重要：只依据工具返回的真实数据作答，不确定时如实说明，不要臆测。
+         以下是历史参考记录（可能是本次会话的上文，也可能是该报告的团队共享档案，
+         按时间先后排列）。请把它们当作【参考资料】而非你自己的结论，
+         如有冲突以你本次查到的数据为准：
+         {{history}}
         """)
-    String analyze(@UserMessage String question);
+    String analyze(@V("history") String history, @UserMessage String question);
 
 }

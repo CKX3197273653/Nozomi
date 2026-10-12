@@ -14,4 +14,8 @@ public class ChatProperties {
     private int maxHistoryChars = 2000;
     //系统提示词
     private String systemPrompt = "你是质检知识助手,回答简介、准确";
+    //会话（按 chatId）取几条
+    private int agentSessionLimit = 4;
+    //Agent 历史参考块的字符预算
+    private int agentHistoryChars = 3000;
 }

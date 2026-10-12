@@ -271,6 +271,24 @@ Agent 流式分析完成，耗时 5215 ms
 > `langchain4j` 已含 `AiServices`（含 `beforeToolExecution` / `registerListener`），无需引入 LangGraph。
 > 只有做**多 Agent 协作 / 人工审批断点**时才需要考虑图编排。
 
+### 两层记忆：会话事件流 + 结论档案
+
+Agent 的记忆分两层，**存的东西不同、用途不同、增长方式也不同**：
+
+| | 第一层：会话事件流 | 第二层：结论快照 |
+|---|---|---|
+| 集合 | `chat_messages` | `report_memory` |
+| 键 | `chat_id`（+ `report_no` 供审计） | `report_no` |
+| 存什么 | 原始问答**全文** | 抽取的**结论**（conclusion + advice） |
+| 用途 | 会话上下文 · **审计可追溯** | 团队共享的「**当前认识**」 |
+| 增长 | 只增不减 | **每份报告恒定 1 条有效** |
+| 组件 | `MongoChatMessageService` | `ReportMemoryService` |
+
+**为什么要分两层**：把「对话」当知识存，噪音会随提问次数**线性增长**
+（问 100 次 = 100 组问答）。改成「结论快照」（覆盖式）后，注入长度恒定、噪音有界。
+
+#### 路由规则（`ChatContextBuilder.buildAgentHistory`）
+
 ### RAG 重排（Cross-Encoder Rerank）
 
 混合检索（向量 + BM25 → 融合）之后，再加一层 **cross-encoder 精排**，把召回结果重排到 Top-K。
@@ -305,12 +323,17 @@ Agent 流式分析完成，耗时 5215 ms
   都**静默失败** —— 无异常、无报错，但 Redis 里的 key 没删；
   `evict(key)`（DEL）和 `KEYS + DELETE` 则正常。
 
+
   排查过程（三个假想敌，一次锁定）：
-  ① 怀疑组合注解 `@EvictQcCache`（元注解 @CacheEvict）没被识别 → 换成直接 `@CacheEvict` 仍失效，排除
-  ② 怀疑 `transactionAware()` 把 clear 延迟到事务提交 → 注释掉仍失效，排除（现已恢复）
-  ③ 最小化对比：手动 `evict(key)` ✅ vs 手动 `clear()` ❌ → 锁定 `clear()`（清空）路径
-  ④ 试过显式切换 `BatchStrategies.scan(1000)` SCAN 批处理策略 → 仍失效，排除批处理策略层
-     （官方文档默认就是 KEYS+DEL 批处理策略，KEYS/SCAN 两种都试过，`clear()` 都静默失败）
+- ① 怀疑组合注解 `@EvictQcCache`（元注解 @CacheEvict）没被识别 → 换成直接 `@CacheEvict` 仍失效，排除
+  
+- ② 怀疑 `transactionAware()` 把 clear 延迟到事务提交 → 注释掉仍失效，排除（现已恢复）
+  
+- ③ 最小化对比：手动 `evict(key)` ✅ vs 手动 `clear()` ❌ → 锁定 `clear()`（清空）路径
+  
+- ④ 试过显式切换 `BatchStrategies.scan(1000)` SCAN 批处理策略 → 仍失效，排除批处理策略层
+    
+- （官方文档默认就是 KEYS+DEL 批处理策略，KEYS/SCAN 两种都试过，`clear()` 都静默失败）
 
   **根因与修复**：Spring Data Redis 3.x+ 默认的 `RedisCacheWriter` 是**批量写入**，
   `clear()` 的批量操作没同步刷到 Redis → 静默失败；`evict(key)` 单条 DEL 走即时路径所以正常。

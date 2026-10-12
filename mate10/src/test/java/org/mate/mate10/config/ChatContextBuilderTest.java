@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.mate.mate10.document.ChatMessageDocument;
 import org.mate.mate10.service.MongoChatMessageService;
 import org.mate.mate10.service.RagService;
+import org.mate.mate10.service.ReportMemoryService;
 
 import java.util.List;
 
@@ -22,8 +23,9 @@ class ChatContextBuilderTest {
     private final MongoChatMessageService messageService = mock(MongoChatMessageService.class);
     private final RagService ragService = mock(RagService.class);
     private final ChatProperties chatProperties = new ChatProperties();
+    private final ReportMemoryService reportMemoryService = mock(ReportMemoryService.class);
 
-    private final ChatContextBuilder builder = new ChatContextBuilder(messageService, ragService,chatProperties);
+    private final ChatContextBuilder builder = new ChatContextBuilder(messageService,ragService,chatProperties,reportMemoryService);
 
 
     @Test

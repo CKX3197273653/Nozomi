@@ -18,22 +18,34 @@ public class MongoChatMessageServiceImpl implements MongoChatMessageService {
     private final ChatMessageRepository chatMessageRepository;
 
     @Override
-    public void saveUserMessage(Long chatId,Long userId,String content){
+    public void saveUserMessage(Long chatId, Long userId, String content) {
+        saveUserMessage(chatId,userId,content,null);
+    }
+
+    @Override
+    public void saveAiMessage(Long chatId, Long userId, String content) {
+        saveAiMessage(chatId,userId,content,null);
+    }
+
+    @Override
+    public void saveUserMessage(Long chatId,Long userId,String content,String reportNo) {
         ChatMessageDocument message = new ChatMessageDocument();
         message.setChatId(chatId);
         message.setUserId(userId);
         message.setRole("User");
         message.setContent(content);
+        message.setReportNo(reportNo);
         message.setCreateTime(LocalDateTime.now());
         chatMessageRepository.save(message);
     }
     @Override
-    public void saveAiMessage(Long chatId,Long userId,String content){
+    public void saveAiMessage(Long chatId,Long userId,String content,String reportNo) {
         ChatMessageDocument message = new ChatMessageDocument();
         message.setChatId(chatId);
         message.setUserId(userId);
         message.setRole("ai");
         message.setContent(content);
+        message.setReportNo(reportNo);
         message.setCreateTime(LocalDateTime.now());
         chatMessageRepository.save(message);
     }
@@ -45,6 +57,16 @@ public class MongoChatMessageServiceImpl implements MongoChatMessageService {
         Collections.reverse(asc);   // 转成时间升序
         return asc;
     }
+
+    @Override
+    public List<ChatMessageDocument> getRecentMessagesByReportNo( String reportNo, int limit) {
+        List<ChatMessageDocument> desc = chatMessageRepository
+                .findByReportNoOrderByCreateTimeDesc(reportNo, PageRequest.of(0, limit));
+        List<ChatMessageDocument> asc = new ArrayList<>(desc);
+        Collections.reverse(asc);  //倒序取N条 -> 反转成时间正序
+        return asc;
+    }
+
     @Override
     public  List<ChatMessageDocument> getMessagesByChatId(Long chatId){
         return chatMessageRepository.findByChatId(chatId);

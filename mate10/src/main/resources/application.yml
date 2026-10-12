@@ -46,6 +46,8 @@ app:
     max-history-messages: 10
     max-history-chars: 2000
     system-prompt: "你是质检知识助手，回答简洁、准确。"
+    agent-session-limit: 4
+    agent-history-chars: 3000
 
 tesseract:
   language: "chi_sim"
