@@ -288,6 +288,83 @@ Agent 的记忆分两层，**存的东西不同、用途不同、增长方式也
 （问 100 次 = 100 组问答）。改成「结论快照」（覆盖式）后，注入长度恒定、噪音有界。
 
 #### 路由规则（`ChatContextBuilder.buildAgentHistory`）
+```
+问句含报告编号（\bR\d{11}\b）
+    → 读【结论档案】report_memory（团队共享、跨会话）
+问句不含编号
+    → 读【本次会话上文】chat_messages（按 chatId）
+```
+#### 覆盖语义（核心不变式）
+
+```
+同一 reportNo 下，superseded=false 的记录【最多 1 条】
+
+写入新结论时：
+  ① 旧的有效结论 → 全部标记 superseded=true（留痕，不物理删除 → 审计可追溯）
+  ② 新结论 superseded=false → 成为唯一有效
+读取时：
+  只取 superseded=false 的最新一条
+```
+推荐建**部分唯一索引**，从数据库层面兜底（防并发写坏）：
+
+```javascript
+db.report_memory.createIndex(
+  { report_no: 1 },
+  { unique: true, partialFilterExpression: { superseded: false } }
+)
+```
+#### 天然质量门（零成本）
+
+`ReportMemoryServiceImpl.extractSection()` 从回答里切出 `## 根因判断` 段，
+**切不到就不入档**：
+
+| 回答类型 | 是否入档 |
+|---|---|
+| 完整根因分析（含 `## 根因判断`） | ✅ 入档 |
+| 「之前分析出什么了？」这类**元提问** | ❌ 不入档（标题是「既往分析结论」） |
+| 标准问答 / 闲聊（如「划痕的判定标准」） | ❌ 不入档 |
+
+> ⚠️ 这依赖 `QcAnalysisAgent` 的 SystemMessage 强制四段结构
+> （`## 根因判断 / ## 改进建议 / ## 判断依据 / ## 信息缺口`）。
+> **改 SystemMessage 的输出格式前，先确认这里还能切到段**，否则质量门会失效。
+
+#### 相关类
+
+| 类 | 职责 |
+|---|---|
+| `document/ReportMemoryDocument` | 结论档案文档（`report_memory` 集合） |
+| `repository/ReportMemoryRepository` | 查询 `findByReportNoAndSupersededFalse` 等 |
+| `service/ReportMemoryService` | 抽段 + 覆盖写入 + 读最新 |
+| `config/ChatContextBuilder.buildAgentHistory` | 路由 + 格式化注入 |
+| `controller/qc/QcAgentController.saveMemory` | 两层分发（流式/非流式**共用**） |
+
+#### 配置（`app.chat.*`）
+
+| 配置 | 默认 | 说明 |
+|---|---|---|
+| `agent-session-limit` | 4 | 会话分支取几条 |
+| `agent-history-chars` | 3000 | 参考块字符预算 |
+
+#### 验证方式
+
+```
+① 问「分析 R20260808001 的根因」                → 首次入档
+② 换新会话问「R20260808001 之前分析出什么了？」   → 读到档案（跨会话）★
+③ 再问「再分析一次 R20260808001 的根因」          → 覆盖旧结论
+
+查库验收：
+  db.report_memory.find({ report_no: "R20260808001" })
+  预期：superseded=false 的记录【恰好 1 条】
+```
+
+#### 本层待办
+
+- [ ] 清理死配置：`ChatProperties.agentArchiveLimit`（yml 那行你已删 ✅）
+- [ ] `getRecentMessagesByReportNo` 标注「为审计视图预留」（当前无调用方）
+- [ ] 建 `report_memory` 部分唯一索引（见上）
+- [ ] **二期**：**数据指纹** —— 分析时记录
+  `data_version = hash(报告状态 + 缺陷数 + 生产参数)`，
+  数据未变时可直接复用结论，**省一次 Agent 调用**
 
 ### RAG 重排（Cross-Encoder Rerank）
 
@@ -697,6 +774,7 @@ npm run preview   # 预览构建结果
 | `v0.4.0` | 09-17 | 工程化加固：安全（`@PreAuthorize` / JWT 外部化）、配置外部化、13 个单测、CI |
 | `v0.9.9` | 09-22 | **工程化跃迁**：容器化部署（11 服务）· Flyway · Actuator/Prometheus · Redis 缓存 · 质检分析 Agent（L1）· RAG 混合检索 |
 | `v0.10.0` | 10-11 | **RAG 重排（Cross-Encoder Rerank）**：bge-reranker-base ONNX 精排，命中率 96.7%→100%，补 11 个单测（28 全绿） |
+| `v0.11.0` | 10-12 | **两层记忆**：报告结论档案（`report_memory`）—— 覆盖式写入 + 旧版留痕 + 天然质量门；集成测试补 `@EvictQcCache` 实证与 Lucene 目录隔离 |
 
 **v0.9.9 为什么从 v0.4.0 直接跳上来**：容器化、监控、缓存、Agent、混合检索
 是**同一条主线**（把"能跑的个人项目"变成"可观测、可部署、有 AI 决策能力的系统"），
@@ -704,4 +782,4 @@ npm run preview   # 预览构建结果
 
 **v0.10.0 的定位**：在混合检索（召回）之上补齐「精排」，完成 RAG 两段式闭环。
 JDK 从 GraalVM 换成 Microsoft OpenJDK（解决 onnxruntime 原生库不兼容，见「已知问题」）。
-距生产级 1.0 还差：集成测试、多环境验证、Rerank 性能优化（GPU）。
+距生产级 1.0 还差：多环境验证、Rerank 性能优化（非 GPU 路线）。
