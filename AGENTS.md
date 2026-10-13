@@ -358,13 +358,10 @@ db.report_memory.createIndex(
 ```
 
 #### 本层待办
-
-- [ ] 清理死配置：`ChatProperties.agentArchiveLimit`（yml 那行你已删 ✅）
-- [ ] `getRecentMessagesByReportNo` 标注「为审计视图预留」（当前无调用方）
-- [ ] 建 `report_memory` 部分唯一索引（见上）
 - [ ] **二期**：**数据指纹** —— 分析时记录
   `data_version = hash(报告状态 + 缺陷数 + 生产参数)`，
   数据未变时可直接复用结论，**省一次 Agent 调用**
+> 补 `getRecentMessagesByReportNo` 审计注释、建 `report_memory` 部分唯一索引。
 
 ### RAG 重排（Cross-Encoder Rerank）
 
