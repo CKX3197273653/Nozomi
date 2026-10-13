@@ -11,7 +11,7 @@
 | **frontend** | mate10-frontend | **80** | Nginx 托管 Vue 静态文件 + 反向代理 |
 | backend | mate10-backend | `127.0.0.1:8080` | Spring Boot 应用（前端经 Docker 内网访问） |
 | mysql | mysql:8.0 | `127.0.0.1:3306` | 业务数据 |
-| mongo | mongo:6 | `127.0.0.1:27017` | 聊天记录 |
+| mongo | mongo:6 | `127.0.0.1:27017` | 聊天记录 + 结论档案（`report_memory`） |
 | redis | redis:7-alpine | `127.0.0.1:6379` | 缓存 |
 | kafka | apache/kafka:4.1.0 | `127.0.0.1:9092` | 异步消息（KRaft 单节点） |
 | milvus | milvusdb/milvus:v2.6.16 | `127.0.0.1:19530` | 向量库 |
@@ -26,6 +26,10 @@
 
 服务间通过 **Docker 内部网络用服务名互访**（如 `mysql:3306`、`kafka:9092`），
 无需 `host.docker.internal`，也无需关心宿主机 IP。
+
+> 📌 **镜像 tag 建议与项目 release 对齐**：当前 compose 里是 `:0.5.0`，
+> 而项目已到 `v0.11.0`，两者脱节会让「线上跑的是哪版」变得难以判断。
+> 下次构建建议打成 `:0.11.0` 这类与 tag 同名的版本。
 
 ---
 
@@ -139,6 +143,7 @@ curl -i http://localhost:8080/actuator/env
 | `DEEPSEEK_API_KEY` | ✅ | cloud 模式对话模型 |
 | `ZHIPU_API_KEY` | ✅ | cloud 模式 Embedding |
 | `GRAFANA_PASSWORD` | ✅ | Grafana 管理员密码（用户名固定 `admin`） |
+| `APP_RAG_RERANK_ENABLED` | ⚠️ **建议显式设 `false`** | 不设则默认 `true`，而容器里没有模型文件 → **启动失败**（见「踩坑记录 · Rerank」）|
 
 **⚠️ 密码建议用纯字母数字** —— MongoDB 的 URI 里密码需要 URL 编码，
 用特殊字符容易踩坑。
@@ -311,7 +316,7 @@ Redis 是单线程处理命令的，一次慢 `DEL` 会让所有其他请求排�
 
 **`KEYS` 是 O(N) 遍历，且会阻塞 Redis** ⚠️ —— key 上万时会明显卡顿。
 
-**优化：改用 `SCAN`（游标分批遍历，不阻塞）**
+**优化思路：改用 `SCAN`（游标分批遍历，不阻塞）**
 
 ```java
 import org.springframework.data.redis.cache.BatchStrategies;
@@ -329,8 +334,72 @@ return RedisCacheManager.builder(cacheWriter)   // 用带 writer 的重载
         .build();
 ```
 
-> 本项目当前 key 只有个位数，**暂时不需要改** ✅
-> 数据量上来后（key 上万）再切 `SCAN` 更稳妥。
+> ⚠️⚠️ **上面这段代码不能照抄直接替换现有写入器！**
+>
+> `nonLockingRedisCacheWriter` **不带 `immediateWrites()`**，而后者是修复
+> 「`RedisCache.clear()` 静默失效」这个框架 bug 的关键（详见 `AGENTS.md` 的「已知问题」）。
+> **照抄会让缓存失效重新变成静默失败** —— 写操作看起来成功了，但 Redis 里的 key 根本没删。
+>
+> **另外**：`SCAN` 与那个 bug 是**两件不相干的事** ——
+> 项目里**已经试过** `BatchStrategies.scan(1000)`，`clear()` 仍然静默失败（已排除批处理策略层）。
+> 真正的修复是 `immediateWrites()`。
+>
+> **所以要上 `SCAN`，必须**：
+> ① 在**保留 `immediateWrites()`** 的前提下叠加批处理策略；
+> ② 改完**实测 `clear()` 是否仍然生效**
+>    （写一条缓存 → 触发 `@EvictQcCache` → `redis-cli` 确认 key 真被删）。
+>
+> 本项目当前 key 只有个位数，**暂时不需要改** ✅ —— 数据量上来（key 上万）再动，且务必按上面两步验证。
+
+### ⚠️ Rerank（精排）：模型缺失会导致容器启动失败
+
+**现象**：重新构建镜像部署后，backend 容器**反复重启**，日志里能看到：
+
+```
+IllegalStateException: [Rerank] 模型文件不存在:D:/AIGC/bge-reranker-base/onnx/model.onnx
+```
+
+**证据链**：
+
+```
+application.yml       app.rag.rerank.enabled = true（默认开启）
+application-prod.yml  未覆盖 app.rag → 生产也继承 true
+model-path 默认值     D:/AIGC/...（Windows 路径，Linux 容器里不存在）
+CrossEncoderReranker  构造函数校验模型文件，不存在就 throw → 上下文启动失败
+docker-compose.yml    既没挂模型卷，也没设 RERANK_MODEL_PATH
+```
+
+**关键点**：这是一个**可选增强功能，却拥有让整个应用起不来的权力**。
+本地能跑是因为 `D:/AIGC/` 真有那个模型文件 —— **典型的「本地正常、容器必炸」**。
+
+**两种解法（部署时二选一）**：
+
+| 方案 | 做法 | 适用 |
+|---|---|---|
+| **A. 关掉精排**（推荐） | compose 的 backend 环境变量加 `APP_RAG_RERANK_ENABLED: "false"` | CPU 推理慢（30 题约 145s），云服务器体验差 |
+| **B. 挂载模型** | 设 `RERANK_MODEL_PATH` / `RERANK_TOKENIZER_PATH`，并挂卷 `./models/bge-reranker-base:/app/models/bge-reranker-base:ro` | 服务器性能足够、确实需要精排 |
+
+**方案 A 示例**：
+
+```yaml
+  backend:
+    environment:
+      SPRING_PROFILES_ACTIVE: prod,cloud
+      APP_RAG_RERANK_ENABLED: "false"      # Spring 宽松绑定：app.rag.rerank.enabled
+```
+
+**方案 B 示例**：
+
+```yaml
+  backend:
+    environment:
+      RERANK_MODEL_PATH: /app/models/bge-reranker-base/onnx/model_quantized.onnx
+      RERANK_TOKENIZER_PATH: /app/models/bge-reranker-base/tokenizer.json
+    volumes:
+      - ./models/bge-reranker-base:/app/models/bge-reranker-base:ro
+```
+
+> 关掉后 `HybridRetriever` 自动回退 RRF 融合，命中率 100% → 96.7%（仍可用）。
 
 ---
 
@@ -402,6 +471,19 @@ docker compose exec prometheus \
   （等价于 `@CacheEvict(cacheNames = {"qcStats", "qcDetail"}, allEntries = true)`）
 - 失效采用**粗粒度**：QC 数据写入低频、统计查询高频，「写一次清一次」简单且不会漏清
 - 缓存操作由 `RedisConfig` 的 `transactionAware()` 保证在**事务提交后**执行，避免脏数据回写
+- **写入器必须用 `immediateWrites()`**：
+
+  ```java
+  RedisCacheWriter.create(connectionFactory, b -> b.immediateWrites());
+  ```
+
+  Spring Data Redis 3.x+ 默认的 `RedisCacheWriter` 是**批量写入**，
+  会让 `clear()`（即 `@EvictQcCache` 的 `allEntries=true`）**静默失效** ——
+  无异常、无报错，但 Redis 里的 key 根本没删。
+  `immediateWrites()` 强制所有写入立即同步执行，恢复正常。
+
+  > 详细排查过程见 `AGENTS.md` 的「已知问题」；
+  > `QcReportCacheIntegrationTest` 就是为「只有真 Redis 才能抓到」这类 bug 而生的。
 
 ### ⚠️ 生产必配：`maxmemory`
 

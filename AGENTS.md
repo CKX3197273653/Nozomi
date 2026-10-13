@@ -358,10 +358,45 @@ db.report_memory.createIndex(
 ```
 
 #### 本层待办
+
 - [ ] **二期**：**数据指纹** —— 分析时记录
   `data_version = hash(报告状态 + 缺陷数 + 生产参数)`，
   数据未变时可直接复用结论，**省一次 Agent 调用**
+
+> ✅ 已完成（v0.11.0）：清死配置 `agentArchiveLimit`、
 > 补 `getRecentMessagesByReportNo` 审计注释、建 `report_memory` 部分唯一索引。
+
+### 报告审计（可追溯）
+
+**端点**：`GET /api/qc/report/{reportNo}/audit` 🔒 **需 ADMIN 角色**（`role=1`）
+
+回答一个问题：**这份报告的判定是怎么来的？**
+
+| 返回字段 | 含义 | 数据来源 |
+|---|---|---|
+| `versionCount` | 结论改过几次 | `report_memory` |
+| `conclusionTimeline` | 结论版本链（含被覆盖的历史） | `report_memory` |
+| `current` | 当前有效结论 | `report_memory` |
+| `discussions` | 谁在什么时候讨论过 | `chat_messages.report_no` |
+
+**数据基础**（v0.11.0 已铺好）：
+- 旧结论标 `superseded=true` 留痕（不物理删除）→ 天然 before/after
+- `analyzed_by` / `analyzed_at` 记录「谁、何时」
+- `chat_messages.report_no` 记录讨论轨迹
+
+**组件**：`ReportAuditService` + `ReportAuditServiceImpl` + `dto/ReportAuditDTO`
+
+**权限**：`@PreAuthorize("hasRole('ADMIN')")` —— 需 `role=1` 的账号
+（`JwtAuthenticationFilter` 对 `role=1` 授予 `ROLE_ADMIN`；普通账号返回 403）
+
+**边界行为**：该报告无任何记录时返回空轨迹（`versionCount=0`、`current=null`），**不抛异常**
+
+**验证**：用 **ADMIN 账号**请求，日志应出现
+`[Audit] reportNo=… 结论版本 N 次，讨论记录 M 条`
+
+> 💡 审计的设计原则（本实现已符合）：
+> 只追加不改历史（`superseded` 软删除）、记录变更前后（版本链）、
+> 记录 who/when（`analyzed_by`/`analyzed_at`）、用服务端时间。
 
 ### RAG 重排（Cross-Encoder Rerank）
 
@@ -397,16 +432,15 @@ db.report_memory.createIndex(
   都**静默失败** —— 无异常、无报错，但 Redis 里的 key 没删；
   `evict(key)`（DEL）和 `KEYS + DELETE` 则正常。
 
-
   排查过程（三个假想敌，一次锁定）：
 - ① 怀疑组合注解 `@EvictQcCache`（元注解 @CacheEvict）没被识别 → 换成直接 `@CacheEvict` 仍失效，排除
-  
+
 - ② 怀疑 `transactionAware()` 把 clear 延迟到事务提交 → 注释掉仍失效，排除（现已恢复）
-  
+
 - ③ 最小化对比：手动 `evict(key)` ✅ vs 手动 `clear()` ❌ → 锁定 `clear()`（清空）路径
-  
+
 - ④ 试过显式切换 `BatchStrategies.scan(1000)` SCAN 批处理策略 → 仍失效，排除批处理策略层
-    
+
 - （官方文档默认就是 KEYS+DEL 批处理策略，KEYS/SCAN 两种都试过，`clear()` 都静默失败）
 
   **根因与修复**：Spring Data Redis 3.x+ 默认的 `RedisCacheWriter` 是**批量写入**，
@@ -415,7 +449,9 @@ db.report_memory.createIndex(
   `RedisCacheWriter.create(connectionFactory, b -> b.immediateWrites())`
   → 所有写入（含 clear）立即同步执行 → 恢复正常（KEYS+DEL 工作区已移除）。
   ⚠️ 其余 Service（`QcDefectServiceImpl` / `QcProductionParamServiceImpl`）的
-  `@EvictQcCache` 之前同样失效，immediateWrites 修复后应已恢复，可抽查验证。
+  `@EvictQcCache` 之前同样失效，immediateWrites 修复后已恢复 ——
+  已由 `QcReportCacheIntegrationTest` 的 `defectWriteEvictsCache` /
+  `paramWriteEvictsCache` 实测覆盖。
 
   > 方法论：这是「集成测试（真 Redis）才能抓到的 bug」—— 单测 mock 掉缓存，
   > 永远测不出「清空失效」。`QcReportCacheIntegrationTest` 就是为它而生的。
@@ -423,8 +459,8 @@ db.report_memory.createIndex(
 - **`onnxruntime` 原生库 + GraalVM 不兼容（重要，排查了四个假想敌才定位）** ⚠️
 
   Rerank 的 ONNX 原生库在 GraalVM 下报错：
-  - onnxruntime 1.22.0 → `UnsatisfiedLinkError: DLL初始化例程失败`
-  - onnxruntime 1.31.0 → `EXCEPTION_ACCESS_VIOLATION`（崩在 `msvcp140.dll`）
+    - onnxruntime 1.22.0 → `UnsatisfiedLinkError: DLL初始化例程失败`
+    - onnxruntime 1.31.0 → `EXCEPTION_ACCESS_VIOLATION`（崩在 `msvcp140.dll`）
 
   **真凶是 GraalVM 的 `jvmci` 编译器**，不是系统 DLL、不是 VC++ 运行库、不是版本。
   **解法**：换成标准 OpenJDK（Microsoft Build of OpenJDK 17，HotSpot/C2）→ 正常。
@@ -434,7 +470,7 @@ db.report_memory.createIndex(
   ② 怀疑撞 Win11 24H2 系统 `onnxruntime.dll` → 重命名后仍失败，排除（现已恢复）
   ③ 怀疑版本太新崩溃 → 换 1.31.0 表现不同但都不行
   ④ **最小化实验对比 JVM** → 写 `OrtEnvironment.getEnvironment()` 最小 main，
-     分别用 GraalVM / OpenJDK 跑 → OpenJDK 成功、GraalVM 失败 → 锁定 ✅
+  分别用 GraalVM / OpenJDK 跑 → OpenJDK 成功、GraalVM 失败 → 锁定 ✅
 
   > 方法论：遇到「玄学」原生库问题，写个最小 main 分别用不同 JVM 跑，一分钟二分定位，别瞎猜。
 
@@ -443,7 +479,7 @@ db.report_memory.createIndex(
   无报错、无日志、配置属性无法解析，最难排查：
 
   | 中间件 | 库 | 集成层（必需） |
-  |---|---|---|
+    |---|---|---|
   | Flyway | flyway-core | spring-boot-flyway（或 `spring-boot-starter-flyway`） |
   | MongoDB | mongodb-driver-sync | spring-boot-data-mongodb |
   | Kafka | kafka-clients | spring-boot-kafka |
@@ -476,9 +512,9 @@ db.report_memory.createIndex(
           .build();
   ```
 
-  - **验证**：`redis-cli GET "qcDetail::report:1"` 应能看到 `"@class":"org.mate..."`
-  - **修复后必须清旧缓存**：`redis-cli FLUSHDB`
-    （旧数据没有 `@class`，即使代码修好仍会报错）
+    - **验证**：`redis-cli GET "qcDetail::report:1"` 应能看到 `"@class":"org.mate..."`
+    - **修复后必须清旧缓存**：`redis-cli FLUSHDB`
+      （旧数据没有 `@class`，即使代码修好仍会报错）
 
 - **`@Cacheable` 遇到 null 返回值会抛异常**：
   `RedisConfig` 配了 `disableCachingNullValues()`，方法返回 null 时 Spring 会抛
@@ -501,11 +537,11 @@ db.report_memory.createIndex(
 
   **根因**：
 
-  1. 请求进来 → Security 过滤（`dispatcherType = REQUEST`）→ 带 JWT 放行 ✅
-  2. 异步执行完 → `emitter.complete()` → Tomcat 触发 **ASYNC dispatch**
-  3. Spring Security 7 默认对**所有 dispatcherType** 做授权检查
-     → 异步线程里 `SecurityContext` 已清空
-     → `.anyRequest().authenticated()` → 拒绝 ❌
+    1. 请求进来 → Security 过滤（`dispatcherType = REQUEST`）→ 带 JWT 放行 ✅
+    2. 异步执行完 → `emitter.complete()` → Tomcat 触发 **ASYNC dispatch**
+    3. Spring Security 7 默认对**所有 dispatcherType** 做授权检查
+       → 异步线程里 `SecurityContext` 已清空
+       → `.anyRequest().authenticated()` → 拒绝 ❌
 
   调用栈特征（用来辨认）：
 
@@ -532,7 +568,6 @@ db.report_memory.createIndex(
   > 第 1 次 REQUEST 派发时已经检查过了，放行它**不降低安全性**。
   > `/ai/chat/stream` 也有同样问题，一并解决。
 
-- **无测试文件**：`src/test/java` 为空，无单元测试
 - **Swagger UI**：`http://localhost:8080/swagger-ui.html`（已放行匿名访问）
 
 ---
@@ -577,9 +612,9 @@ npm run preview   # 预览构建结果
 - **流式对话**：`api/chat.js` 的 `chatStream()` 用原生 `fetch` 绕过 axios 拦截器
   （SSE 响应是裸文本流，没有 `{code,msg,data}` 结构）
 - **质检 Agent 页面**：`views/qc/Agent.vue`（路由 `/agent`，菜单图标 `MagicStick`）
-  - 实时展示**工具调用轨迹**（`running` / `done` 卡片）+ 最终结论
-  - `api/agent.js` 的 `agentStream()` 同样用原生 `fetch`（SSE + 需要 `Authorization` 头）
-  - 事件类型：`start` / `tool` / `message` / `error` / `done`
+    - 实时展示**工具调用轨迹**（`running` / `done` 卡片）+ 最终结论
+    - `api/agent.js` 的 `agentStream()` 同样用原生 `fetch`（SSE + 需要 `Authorization` 头）
+    - 事件类型：`start` / `tool` / `message` / `error` / `done`
 
 > ⚠️ **SSE 多行 data 必须用 `\n` 拼回**：后端 `message` 事件含换行的 Markdown，
 > 会被 SSE 规范拆成多个 `data:` 行。前端若直接拼接（`data += line`）会**丢掉换行**，
@@ -611,7 +646,7 @@ npm run preview   # 预览构建结果
     - **⚠️ 启动失败的三种报错，同一个根因（文件只读 / 被占用）**：
 
       | 报错信息 | 触发点 |
-      |---|---|
+            |---|---|
       | `No meta.properties found` | `.checkpoint` 文件为**只读** |
       | `AccessDeniedException: 另一个程序正在使用此文件` | 日志压缩时文件被占用 |
       | `FileSystemException: atomic move failed` → `Shutdown broker because all log dirs have failed` | **Log Cleaner 原子重命名失败** |
@@ -623,16 +658,16 @@ npm run preview   # 预览构建结果
 
       **三级解法（按顺序试）**：
 
-      1. 清只读属性：
-         `attrib -R "D:\Kafka\kafka_2.13-4.1.0\kraft-meta\*.*" /S`
-         （`kraft-logs` 同样处理）
-      2. 加 Defender 排除（**需管理员**）：
-         `powershell -NoProfile -Command "Add-MpPreference -ExclusionPath 'D:\Kafka'"`
-         图形界面：Windows 安全中心 → 病毒和威胁防护 → 管理设置 → 排除项
-      3. **兜底（无需管理员，开发环境够用）**：在 `config\server.properties`
-         **末尾**加一行 `log.cleaner.enable=false`，禁用日志压缩器，
-         彻底绕开 `__consumer_offsets` 的清理操作。
-         代价：该 topic 不再压缩（多占少量磁盘），**生产环境不建议**。
+        1. 清只读属性：
+           `attrib -R "D:\Kafka\kafka_2.13-4.1.0\kraft-meta\*.*" /S`
+           （`kraft-logs` 同样处理）
+        2. 加 Defender 排除（**需管理员**）：
+           `powershell -NoProfile -Command "Add-MpPreference -ExclusionPath 'D:\Kafka'"`
+           图形界面：Windows 安全中心 → 病毒和威胁防护 → 管理设置 → 排除项
+        3. **兜底（无需管理员，开发环境够用）**：在 `config\server.properties`
+           **末尾**加一行 `log.cleaner.enable=false`，禁用日志压缩器，
+           彻底绕开 `__consumer_offsets` 的清理操作。
+           代价：该 topic 不再压缩（多占少量磁盘），**生产环境不建议**。
 
       ---
 
@@ -644,32 +679,32 @@ npm run preview   # 预览构建结果
 
       真正根因 —— **Windows 上 mmap 的惰性释放竞态**：
 
-      1. `log.cleaner.enable=false` 只禁用**日志压缩器**（管 compact 策略），
-         管不了 **Log Retention**（按 `retention.ms` 删段）——**两套独立机制** ⚠️
-      2. Retention 判断段是否过期必须读**段内最大时间戳**（存于 `.timeindex`），
-         这一读触发 mmap 打开该文件
-      3. 读完立即删段 rename —— Windows 不允许 rename 被 mmap 的文件，
-         而 Java `MappedByteBuffer` 的释放是异步的（等 GC）→ 间歇性撞锁
-      4. Kafka 将文件操作失败视为 log dir 硬件故障 → broker 整体停机
-         （Linux 无此问题：POSIX 允许 unmap 后立即重命名，
-         这也是 Kafka 官方不把 Windows 当生产平台的原因）
+        1. `log.cleaner.enable=false` 只禁用**日志压缩器**（管 compact 策略），
+           管不了 **Log Retention**（按 `retention.ms` 删段）——**两套独立机制** ⚠️
+        2. Retention 判断段是否过期必须读**段内最大时间戳**（存于 `.timeindex`），
+           这一读触发 mmap 打开该文件
+        3. 读完立即删段 rename —— Windows 不允许 rename 被 mmap 的文件，
+           而 Java `MappedByteBuffer` 的释放是异步的（等 GC）→ 间歇性撞锁
+        4. Kafka 将文件操作失败视为 log dir 硬件故障 → broker 整体停机
+           （Linux 无此问题：POSIX 允许 unmap 后立即重命名，
+           这也是 Kafka 官方不把 Windows 当生产平台的原因）
 
       **特征识别**（再遇到可秒认）：
-      - 删除批次里 `.log` / `.index` 都成功，**总是 `.timeindex` 失败**
-      - 间歇性发作（取决于 GC 时机）；停机后手动改名立即成功
-        （锁只在 Kafka 运行期间存在）
+        - 删除批次里 `.log` / `.index` 都成功，**总是 `.timeindex` 失败**
+        - 间歇性发作（取决于 GC 时机）；停机后手动改名立即成功
+          （锁只在 Kafka 运行期间存在）
 
       **根治方案（已落地 ✅）**：Kafka 迁到 Docker（Linux 容器），
       配置见 `deploy/docker-compose.yml`：
-      - 双 listener：容器内 `kafka:9092`、宿主机 `host.docker.internal:9094`
-        （`KAFKA_LISTENERS` / `KAFKA_ADVERTISED_LISTENERS` /
-        `KAFKA_LISTENER_SECURITY_PROTOCOL_MAP` 三处同步 + 端口映射 `127.0.0.1:9094:9094`）
-      - 宿主机 hosts 需加 `127.0.0.1 host.docker.internal`（需管理员），
-        否则后端报无法解析该主机名
-      - `application-dev.yml`：`bootstrap-servers: localhost:9094`
-      - **验证结果**：后端启动零 Kafka 报错；`chat-topic` / `qc-report-topic`
-        自动创建；`kafka-console-consumer` 消费到真实聊天消息 ✅
-      - 本机旧配置（`log.cleaner.enable=false` 等）随本机 Kafka 退役，不再使用
+        - 双 listener：容器内 `kafka:9092`、宿主机 `host.docker.internal:9094`
+          （`KAFKA_LISTENERS` / `KAFKA_ADVERTISED_LISTENERS` /
+          `KAFKA_LISTENER_SECURITY_PROTOCOL_MAP` 三处同步 + 端口映射 `127.0.0.1:9094:9094`）
+        - 宿主机 hosts 需加 `127.0.0.1 host.docker.internal`（需管理员），
+          否则后端报无法解析该主机名
+        - `application-dev.yml`：`bootstrap-servers: localhost:9094`
+        - **验证结果**：后端启动零 Kafka 报错；`chat-topic` / `qc-report-topic`
+          自动创建；`kafka-console-consumer` 消费到真实聊天消息 ✅
+        - 本机旧配置（`log.cleaner.enable=false` 等）随本机 Kafka 退役，不再使用
 
 6. 前端 `npm run build` 前必须确认后端已运行，否则代理不可用
 7. 数据库表结构由 **Flyway 在启动时自动创建**（`db/migration/`），不要手工建表
@@ -727,7 +762,7 @@ npm run preview   # 预览构建结果
 - **监控服务**：`prometheus` 走 Docker 内网 `backend:8080` 抓取（不经过 Nginx、不暴露端口）；
   `grafana` 暴露 `3000`，管理员密码取自 `.env` 的 `GRAFANA_PASSWORD`
 
-### 文档地图（改文档前先看这里）
+### 文档地图
 
 | 文件 | 职责 |
 |---|---|
@@ -754,9 +789,6 @@ npm run preview   # 预览构建结果
 
 ---
 
-## 待办 / 学习资料
-- RAG 评测规划与教材存档：`RAGAS.md`（在**桌面**，未纳入仓库；
-  内容是 Java 版 RAGAS 四维评测的学习卡与差异化定位笔记）
 
 ## 版本里程碑
 
@@ -774,7 +806,7 @@ npm run preview   # 预览构建结果
 | `v0.11.0` | 10-12 | **两层记忆**：报告结论档案（`report_memory`）—— 覆盖式写入 + 旧版留痕 + 天然质量门；集成测试补 `@EvictQcCache` 实证与 Lucene 目录隔离 |
 
 **v0.9.9 为什么从 v0.4.0 直接跳上来**：容器化、监控、缓存、Agent、混合检索
-是**同一条主线**（把"能跑的个人项目"变成"可观测、可部署、有 AI 决策能力的系统"），
+是**同一条主线**（可观测、可部署、有 AI 决策能力的系统"），
 拆成多个小版本反而割裂叙事，故合并为一次里程碑发布。
 
 **v0.10.0 的定位**：在混合检索（召回）之上补齐「精排」，完成 RAG 两段式闭环。

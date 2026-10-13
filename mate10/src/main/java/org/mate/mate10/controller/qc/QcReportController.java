@@ -2,9 +2,12 @@ package org.mate.mate10.controller.qc;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.mate.mate10.common.Result;
+import org.mate.mate10.dto.ReportAuditDTO;
 import org.mate.mate10.entity.qc.QcReport;
+import org.mate.mate10.service.ReportAuditService;
 import org.mate.mate10.service.qc.QcReportService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -22,6 +25,17 @@ import java.util.Map;
 public class QcReportController {
     @Autowired
     private QcReportService qcReportService;
+    @Autowired
+    private ReportAuditService reportAuditService;
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/{reportNo}/audit")
+    public Result<ReportAuditDTO> audit(@PathVariable String reportNo) {
+        if (reportNo == null || reportNo.isBlank()) {
+            return Result.error("reportNo 不能为空");
+        }
+        return Result.success(reportAuditService.audit(reportNo));
+    }
 
     //创建报告
     @PostMapping("/create")

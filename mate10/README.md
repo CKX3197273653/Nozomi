@@ -15,6 +15,8 @@
 - [配置说明](#配置说明)
 - [监控与可观测性](#监控与可观测性)
 - [质检分析 Agent](#质检分析-agent)
+- [AI 记忆与审计](#ai-记忆与审计)
+- [RAG 重排（Cross-Encoder Rerank）](#rag-重排cross-encoder-rerank)
 - [性能压测实验](#性能压测实验)
 - [已知事项 / Roadmap](#已知事项--roadmap)
 
@@ -36,7 +38,8 @@
 
 ### 2. RAG 知识问答
 - 基于 LangChain4j：文本/文件 → 切分（512/128 递归切分）→ Ollama embedding → 存入 Milvus
-- 提问时检索 top-3 相关片段作为上下文，由对话模型生成答案
+- 提问时检索 **top-10** 相关片段（`app.rag.top-k`）作为上下文，由对话模型生成答案
+- 混合检索（向量 + Lucene BM25）→ 去重 → **Cross-Encoder 精排**（见「RAG 重排」章节）
 - 支持初始化「质检标准知识库」、按预设质检助手身份问答（`/rag/qc-ask`）
 - 一键清空知识库
 
@@ -60,6 +63,12 @@
 - **安全边界**：只暴露只读工具，即使被提示词注入，模型也只能读不能改
 - 零新增依赖，零侵入（工具代码不含任何埋点）
 
+### 7. AI 记忆与审计
+- **两层记忆**：会话事件流（`chat_messages`，可追溯）+ 结论快照（`report_memory`，团队共享）
+- **结论档案**：从 Agent 回答中切出 `## 根因判断` 段蒸馏入档，覆盖式写入（旧版留痕）
+- **天然质量门**：切不到「## 根因判断」的回答（元提问 / 闲聊）自动不入档
+- **报告审计**：一次拿到「结论怎么变的 + 谁在什么时候讨论过」，可倒推判定依据
+
 ---
 
 ## 技术栈
@@ -70,11 +79,12 @@
 | 框架 | Spring Boot | 4.0.0 |
 | ORM | MyBatis-Plus | 3.5.16 |
 | 数据库 | MySQL | 8.0+ |
-| 数据库 | MongoDB | 4.0+ |
-| 缓存 | Redis | 6.0+ |
+| 数据库 | MongoDB | 6（Docker） |
+| 缓存 | Redis | 7（Docker） |
 | 消息队列 | Apache Kafka | 4.1（KRaft，无 Zookeeper） |
 | AI | LangChain4j | 1.14.1 |
 | AI | 对话/Embedding：Ollama（本地）或 DeepSeek + 智谱（云端） | Profile 切换 |
+| AI | 本地精排：ONNX Runtime（bge-reranker-base） | 1.22 |
 | 向量库 | Milvus（SDK 2.6.18） | 2.x |
 | OCR | Tesseract（Tess4j 5.7.0） | 需本地安装 |
 | 文档解析 | PDFBox / Apache POI | - |
@@ -104,8 +114,8 @@
               ▼                     ▼        ▼                    ▼
          MySQL(业务/QC)        MongoDB      Redis           Kafka
           sys_user / chat      chat_messages                chat-topic
-          qc_report/qc_defect                              qc-report-topic
-          qc_production_param                               │ (AI 任务异步)
+          qc_report/qc_defect  report_memory               qc-report-topic
+          qc_production_param  (结论档案)                    │ (AI 任务异步)
               │                                            ▼
               │                              QC 消费者：解析文件 → AI 识别缺陷
               ▼
@@ -293,29 +303,32 @@
 
 | 依赖 | 说明 |
 | --- | --- |
-| JDK 17+ | 编译运行 |
+| JDK 17+ | 编译运行（建议标准 OpenJDK / Temurin；⚠️ 参见「已知事项」的 onnxruntime 说明） |
 | Maven 3.8+ | 构建 |
 | MySQL 8.0+ | 业务 / QC 数据 |
-| MongoDB 4.0+ | 聊天消息 |
-| Redis 6.0+ | 缓存 |
-| Kafka 3.0+ | 消息队列 |
+| MongoDB 6 | 聊天消息 + 结论档案 |
+| Redis 7 | 缓存 |
+| Kafka 4.1 | 消息队列 |
 | Milvus 2.x | 向量库（RAG） |
 | Ollama | 本地大模型服务 |
 | Tesseract | 图片 OCR（可选，仅图片质检需要） |
 
 ### 1. 启动中间件
 
-MySQL / MongoDB / Redis / Kafka 按常规方式启动。向量库可使用 Docker 快速起（standalone 模式依赖 etcd + minio）：
+中间件已全部 Docker 化（`deploy/docker-compose.yml`）：
 
 ```bash
-# 方式一：使用 milvus 官方 standalone docker-compose 编排
-# 参考 https://milvus.io/docs/install_standalone-docker.md
+cd deploy
+docker compose up -d mysql mongo redis kafka
+```
 
-# 方式二：仅起 Milvus 主服务（需要已有 etcd/minio 或本机已装）
+Milvus 使用独立容器组（standalone + etcd + minio）：
+
+```bash
 docker run -d --name milvus \
   --network host \
   -p 19530:19530 -p 9091:9091 \
-  milvusdb/milvus:v2.4.x standalone
+  milvusdb/milvus:v2.6.16 standalone
 ```
 
 ### 2. 启动 Ollama 并准备模型
@@ -423,7 +436,7 @@ java -jar target/mate10-0.0.1-SNAPSHOT.jar
 | 方法 | 路径 | 参数 | 说明 |
 |---|---|---|---|
 | POST | `/ai/qc-agent` | body `{"question": "分析 R20260808001 的根因"}` | 非流式，一次性返回结论 |
-| POST | `/ai/qc-agent/stream` | 同上 | **SSE 流式**，实时推送工具调用轨迹 + 结论 |
+| POST | `/ai/qc-agent/stream` | 同上（可加 `chatId` / `userId`） | **SSE 流式**，实时推送工具调用轨迹 + 结论 |
 
 **流式事件序列**：
 
@@ -463,6 +476,7 @@ event:done    data: [DONE]
 | GET    | `/api/qc/report/stats/production-line` | -                                                                                 | 按生产线统计            |
 | GET    | `/api/qc/report/stats/product-batch`   | `limit=10`                                                                        | 按批次统计             |
 | GET    | `/api/qc/report/{id}/root-cause`       | -                                                                                 | AI 根因分析（需缺陷+生产参数） |
+| GET    | `/api/qc/report/{reportNo}/audit`      | -                                                                                 | 🔒 **报告审计**（结论版本链 + 讨论记录，需 `role=1`） |
 
 ### 缺陷 `/api/qc/defect`
 
@@ -514,8 +528,15 @@ event:done    data: [DONE]
 ```
 src/main/java/org/mate/mate10/
 ├── Mate10Application.java        # 启动类
+├── agent/                        # 质检分析 Agent（L1）
+│   ├── QcAgentTools.java         # 工具集（全部只读，无埋点）
+│   ├── QcAnalysisAgent.java      # Agent 接口 + SystemMessage
+│   ├── AgentFactory.java         # Agent 工厂（每次请求一个实例）
+│   ├── AgentTraceListener.java   # 工具执行完成钩子 → SSE
+│   └── AgentTraceContext.java    # SSE 事件发送工具
 ├── common/
 │   ├── Result.java               # 统一响应封装 {code,msg,data}
+│   ├── EvictQcCache.java         # QC 缓存失效组合注解（@CacheEvict allEntries）
 │   └── GlobalExceptionHandler.java  # 全局异常处理（统一错误响应）
 ├── config/
 │   ├── SecurityConfig.java           # Security（JWT 无状态认证）+ BCrypt
@@ -526,15 +547,17 @@ src/main/java/org/mate/mate10/
 │   ├── ChatModelFactory.java         # 对话模型工厂（ollama / cloud 双实现）
 │   ├── CloudAiProperties.java        # cloud-ai.* 配置映射
 │   ├── OllamaProperties.java         # ollama.* 配置映射
-│   ├── ChatContextBuilder.java       # 多轮对话上下文组装（历史裁剪 + 字符预算）
+│   ├── ChatContextBuilder.java       # 上下文组装（对话上下文 + Agent 历史，含路由）
 │   ├── ChatProperties.java           # app.chat.* 配置映射
-│   ├── RagProperties.java            # app.rag.* 配置映射（分块参数）
+│   ├── RagProperties.java            # app.rag.* 配置映射（分块 / 混合检索 / 重排）
 │   ├── PromptLoader.java             # 提示词模板加载
 │   ├── MilvusConfig.java             # MilvusClient Bean
 │   ├── MilvusProperties.java         # milvus.* 配置映射
 │   ├── MyBatisConfig.java            # MyBatis-Plus
-│   ├── RedisConfig.java              # RedisTemplate + 缓存管理
-│   └── TesseractConfig.java          # tesseract.* 配置映射（OCR）
+│   ├── RedisConfig.java              # RedisTemplate + 缓存管理（immediateWrites）
+│   ├── TesseractConfig.java          # tesseract.* 配置映射（OCR）
+│   └── qc/
+│       └── QcAgentConfig.java        # 按 profile 装配 Agent，注册轨迹钩子
 ├── controller/
 │   ├── ChatController.java       # /ai/chat、/ai/chatRecord
 │   ├── MongoChatController.java  # /api/chat/*
@@ -544,22 +567,28 @@ src/main/java/org/mate/mate10/
 │   └── qc/
 │       ├── QcDefectController.java
 │       ├── QcProductionParamController.java
-│       └── QcReportController.java
+│       ├── QcReportController.java      # 含 /{reportNo}/audit（报告审计）
+│       └── QcAgentController.java       # /ai/qc-agent
 ├── document/
-│   └── ChatMessageDocument.java  # MongoDB chat_messages 文档
-├── dto/                          # ChatRequest / ChatMessageResponse / CreateChat
+│   ├── ChatMessageDocument.java   # MongoDB chat_messages（会话事件流）
+│   └── ReportMemoryDocument.java  # MongoDB report_memory（结论快照）
+├── dto/                          # ChatRequest / ChatMessageResponse / CreateChat / ReportAuditDTO
 ├── entity/                       # SysUser / Chat / ChatRecord
 │   └── qc/                       # QcReport / QcDefect / QcProductionParam
 ├── mapper/
 │   ├── SysUserMapper.java / ChatMapper.java / ChatRecordMapper.java
 │   └── qc/                       # QC 三个 Mapper（注解 SQL + 统计）
 ├── repository/
-│   └── ChatMessageRepository.java # Spring Data MongoDB Repository
+│   ├── ChatMessageRepository.java    # Spring Data MongoDB Repository
+│   └── ReportMemoryRepository.java   # 结论档案查询（含审计用的全版本查询）
 ├── service/
 │   ├── ChatService / ChatRecordService
 │   ├── FileParseService          # PDFBox / OCR 文件解析
 │   ├── MongoChatMessageService
 │   ├── RagService
+│   ├── ReportMemoryService       # 结论档案：抽段 + 覆盖写入 + 读最新
+│   ├── ReportAuditService        # 报告审计：结论版本链 + 讨论记录
+│   ├── Reranker                  # 重排接口（CrossEncoderReranker 实现）
 │   ├── SysUserService
 │   ├── VectorService
 │   └── qc/                       # QC 三个 Service 接口
@@ -579,26 +608,47 @@ spring:
   datasource:            # MySQL，默认库 mate10db
   mongodb:               # MongoDB uri，默认 mate10db
   data.redis:            # Redis 连接池
-  kafka:                 # bootstrap-servers: localhost:9092
+  kafka:                 # bootstrap-servers: localhost:9094（Docker 化，宿主机专用 listener）
 
 mybatis-plus:            # mapper-locations、驼峰映射、日志
 
 ollama:                  # 本地大模型
-  base-Url: http://localhost:11434
+  base-url: http://localhost:11434
   default-model: deepseek-r1:latest    # 对话模型
+  agent-model: llama3.1:latest         # Agent 专用（deepseek-r1 工具调用能力弱）
   embedding-model: all-minilm:latest   # embedding 模型
 
-milvus:                  # 向量库
+milvus:                  # 向量库（集合名与维度由 AI profile 决定，两者必须成对）
   host: 127.0.0.1
   port: 19530
-  dimension: 2048                      # 需与 embedding 模型维度一致
-  collection-name: rag_documents
+  dimension: 2048                      # cloud: 2048 / ollama: 384
+  collection-name: rag_documents_2048  # cloud: rag_documents_2048 / ollama: rag_documents
+
+app:
+  chat:                  # 对话与 Agent 历史预算
+    max-history-messages: 10           # 对话上下文：最多取几条
+    max-history-chars: 2000            # 对话上下文：字符预算
+    agent-session-limit: 4             # Agent 会话分支：取几条
+    agent-history-chars: 3000          # Agent 历史参考块：字符预算
+  rag:
+    top-k: 10                          # 检索返回片段数
+    hybrid-enabled: true               # 混合检索（向量 + BM25）
+    rerank:
+      enabled: true                    # ⚠️ 开启时【必须】模型文件存在，否则启动失败
+      model-path: "D:/AIGC/bge-reranker-base/onnx/model_quantized.onnx"
+      tokenizer-path: "D:/AIGC/bge-reranker-base/tokenizer.json"
+      recall-factor: 3                 # 先召回 topK×3，再精排取 topK
+      max-length: 510
 
 tesseract:               # 图片 OCR（需本机安装 Tesseract + 中文语言包 chi_sim）
   path: "I:\\OCR\\tesseract-main"
   data-path: "I:\\OCR\\tesseract-main\\tessdata"
   language: "chi_sim"
 ```
+
+> ⚠️ **`app.rag.rerank.enabled: true` 时，模型文件必须存在** ——
+> `CrossEncoderReranker` 在构造函数里校验，文件缺失会**直接让应用启动失败**。
+> 容器部署时尤其注意（容器里默认没有 `D:/AIGC/...`），详见 `deploy/README.md`。
 
 ---
 
@@ -789,6 +839,74 @@ Agent 流式分析完成，耗时 5215 ms
 
 ---
 
+## AI 记忆与审计
+
+### 两层记忆：会话事件流 + 结论快照
+
+| | 第一层：会话事件流 | 第二层：结论快照 |
+|---|---|---|
+| 集合 | `chat_messages` | `report_memory` |
+| 键 | `chatId` | `reportNo`（业务编号） |
+| 存什么 | 原始问答**全文** | 抽取的**结论**（conclusion + advice） |
+| 用途 | 会话上下文 · 审计可追溯 | 团队共享的「**当前认识**」 |
+| 增长 | 只增不减 | **每份报告恒定 1 条有效** |
+
+**问题**：早期把「对话」当知识存 → 问 100 次就堆 100 组问答，噪音**线性增长**，
+注入模型的上下文越来越长。
+
+**解法**：改成「结论快照」——
+
+- 从 Agent 回答中切出 **`## 根因判断`** 段蒸馏入档（**零额外模型调用**，复用已强制的四段输出）
+- **覆盖式写入**：新结论把旧结论标 `superseded=true`（留痕不删 → 审计可追溯），读取只认最新
+- 结果：**注入长度恒定**，噪音有界
+
+**天然质量门**：切不到 `## 根因判断` 的回答（「之前分析出什么了」这类元提问、闲聊、标准问答）
+**自动不入档**。
+
+**路由规则**（`ChatContextBuilder.buildAgentHistory`）：
+
+```
+问句含报告编号（\bR\d{11}\b）  →  读【结论档案】report_memory（团队共享、跨会话）
+问句不含编号                  →  读【本次会话上文】chat_messages（按 chatId）
+```
+
+### 报告审计（可追溯）
+
+回答一个问题：**这份报告的判定是怎么来的？**
+
+`GET /api/qc/report/{reportNo}/audit` 🔒 需 `role=1`
+
+| 返回字段 | 含义 | 数据来源 |
+|---|---|---|
+| `versionCount` | 结论改过几次 | `report_memory` |
+| `conclusionTimeline` | 结论版本链（含被覆盖的历史） | `report_memory` |
+| `current` | 当前有效结论 | `report_memory` |
+| `discussions` | 谁在什么时候讨论过这份报告 | `chat_messages.report_no` |
+
+**设计原则**（本实现已符合）：
+
+| 原则 | 实现 |
+|---|---|
+| 只追加、不改历史 | 旧结论标 `superseded`（软删除） |
+| 记录变更前后 | 版本链天然就是 before/after |
+| 记录 who / when | `analyzed_by` / `analyzed_at` |
+| 用服务端时间 | `LocalDateTime.now()` |
+| 可查询 | 审计接口 + 版本链查询 |
+
+**组件**：`ReportMemoryService` / `ReportAuditService` / `ReportMemoryDocument` / `ReportAuditDTO`
+
+**边界行为**：该报告无任何记录时返回空轨迹（`versionCount=0`、`current=null`），**不抛异常**。
+
+> 📌 数据库层面建议加**部分唯一索引**兜底并发写坏：
+> ```javascript
+> db.report_memory.createIndex(
+>   { report_no: 1 },
+>   { unique: true, partialFilterExpression: { superseded: false } }
+> )
+> ```
+
+---
+
 ## RAG 重排（Cross-Encoder Rerank）
 
 混合检索（向量 + BM25 → 融合）之后，再加一层 **cross-encoder 精排**，
@@ -814,6 +932,9 @@ Agent 流式分析完成，耗时 5215 ms
 - 模型：`bge-reranker-base`（int8 量化 266MB + `tokenizer.json`），放 `D:/AIGC/bge-reranker-base/`，
   从 ModelScope 下载（hf-mirror 本机连不上）
 - 配置：`app.rag.rerank.enabled`（开关）/ `model-path` / `tokenizer-path` / `recall-factor`（默认 3）/ `max-length`
+
+> ⚠️ **模型文件缺失会让应用启动失败**（构造函数里校验并 throw）。
+> 容器部署时请显式关闭（`APP_RAG_RERANK_ENABLED=false`）或挂载模型，详见 `deploy/README.md`。
 
 ### 效果（A/B 对比，30 题评测集）
 
@@ -882,6 +1003,10 @@ Agent 流式分析完成，耗时 5215 ms
   Word / Excel 解析方法为预留（返回空串），上传 Word/Excel 时 AI 无法提取内容。
 - **上传文件清理**：质检报告文件保存在运行目录 `uploads/qc/`（相对路径），
   部署时需注意目录挂载与磁盘清理策略。
+- **`changeReason`（结论变更原因）**：`ReportMemoryDocument` 已预留字段，但尚未写入/暴露 ——
+  需等**数据指纹**落地后才有真实值（数据变了 →「数据更新」；没变 →「重新分析」）。
+- **数据指纹**：分析时记录 `data_version = hash(报告状态 + 缺陷数 + 生产参数)`，
+  数据未变时可直接复用结论，**省一次 Agent 调用**。
 
 ### 设计说明（非缺陷）
 
@@ -889,6 +1014,8 @@ Agent 流式分析完成，耗时 5215 ms
   由 `JwtAuthenticationFilter` 解析 token 并写入 `SecurityContext`。
   仅放行登录、注册、Swagger，以及 Actuator 的 `health` / `prometheus`，其余接口均需认证。
   未认证返回 **401**、无权限返回 **403**（由 `authenticationEntryPoint` / `accessDeniedHandler` 分别处理）。
+- **方法级权限**：`@EnableMethodSecurity` + `@PreAuthorize`。例如报告审计接口要求
+  `hasRole('ADMIN')`（`role=1`），普通账号返回 403。
 - **密钥外部化**：`JwtUtil` 通过 `@Value("${JWT_SECRET_KEY}")` 从环境变量注入，
   并在 `@PostConstruct` 中做启动校验（缺失或不足 32 字节直接启动失败）。
 - **数据库**：所有表统一建在 `mate10db`，**不存在跨库查询**。
@@ -896,9 +1023,15 @@ Agent 流式分析完成，耗时 5215 ms
   读用 `@Cacheable`、写用 `@EvictQcCache` 组合注解（粗粒度失效，避免漏清）。
   缓存序列化用 `GenericJacksonJsonRedisSerializer.builder().enableDefaultTyping(...)`
   —— 必须写 `@class`，否则反序列化会退化成 `LinkedHashMap`。
+  写入器用 `RedisCacheWriter.create(connectionFactory, b -> b.immediateWrites())`
+  —— **必须**：Spring Data Redis 3.x+ 默认的批量写入会让 `clear()`（`allEntries=true`）**静默失效**。
+- **两层记忆**：`chat_messages`（会话事件流）+ `report_memory`（结论快照，覆盖式写入，旧版留痕），
+  路由由问句是否含报告编号决定。详见「AI 记忆与审计」章节。
 - **混合检索 + 重排**：向量（语义）+ Lucene BM25（精确标识符）→ 按文本去重 → cross-encoder 精排。
   关键词索引持久化到 `./data/lucene-index`（与 Milvus 各自持久化），
   可通过 `app.rag.hybrid-enabled` 关闭退回纯向量；`app.rag.rerank.enabled` 关闭退回 RRF 融合。
+- **JDK 选择**：本地开发用 **Microsoft Build of OpenJDK 17**（标准 HotSpot），
+  **不要用 GraalVM** —— Rerank 的 `onnxruntime` 原生库在 GraalVM 的 `jvmci` 编译器下会报
+  `DLL初始化例程失败` / `ACCESS_VIOLATION`。容器镜像用的是 `eclipse-temurin:17-jre`（同为 HotSpot）✅
 - **Profile 优先级**（从高到低）：
   `命令行参数` > `JVM 系统属性 (-D...)` > `操作系统环境变量` > `application.yml`
-

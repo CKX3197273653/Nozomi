@@ -33,4 +33,7 @@ public class ReportMemoryDocument {
 
     @Field("analyzed_at")
     private LocalDateTime analyzedAt;
+
+//    @Field("change_reason")
+//    private String changeReason;
 }
