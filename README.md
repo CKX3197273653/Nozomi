@@ -35,7 +35,8 @@
 | **生产参数管理** | 工艺参数维护与追溯 |
 | **AI 对话助手** | 多轮对话记忆（MongoDB 持久化）+ SSE 流式逐字输出 |
 | **AI 质检 Agent** | 模型**自主调用工具**（LangChain4j `@Tool`），SSE 实时展示调用轨迹 |
-| **RAG 知识库问答** | 文档分块 → 向量检索 → 增强回答，附评测体系 |
+| **AI 记忆与审计** | 两层记忆（会话事件流 + 结论快照）；结论版本链留痕，可倒推「判定是怎么来的」 |
+| **RAG 知识库问答** | 文档分块 → 混合检索 → Cross-Encoder 精排 → 增强回答，附评测体系 |
 | **3D 模型查看** | GLB 模型加载（Three.js） |
 
 ---
@@ -54,8 +55,8 @@
 └──────────────────────────────────────────────────────┘
       ↓            ↓           ↓          ↓
    MySQL       MongoDB      Redis      Milvus
-   业务数据     聊天记录      缓存      向量检索
-                                    （etcd + minio）
+   业务数据   聊天记录+结论   缓存      向量检索
+                档案                  （etcd + minio）
                         +
                      Kafka（异步消息）
 ```
@@ -76,7 +77,7 @@
 **前端**：Vue 3 · Vite 8 · Element Plus · Pinia · Vue Router · Axios · ECharts · Three.js
 **存储**：MySQL 8.0 · MongoDB · Redis · Milvus 2.6
 **中间件**：Kafka 4.1（KRaft）
-**AI**：DeepSeek API · 智谱 embedding-3 · Ollama（本地）
+**AI**：DeepSeek API · 智谱 embedding-3 · Ollama（本地）· ONNX Runtime（本地精排）
 **数据迁移**：Flyway
 **监控**：Spring Boot Actuator · Micrometer · Prometheus · Grafana
 **运维**：Docker 多阶段构建 · docker-compose · Nginx · GitHub Actions
@@ -87,12 +88,14 @@
 
 | 亮点 | 说明 |
 |---|---|
-| **RAG 检索优化** | 通过分块策略调优，检索命中率 **86.7% → 96.7%**（附完整实验记录） |
+| **RAG 两段式检索** | 分块策略 + Top-K 调优：命中率 **86.7% → 96.7%**；再加 **Cross-Encoder 精排**：**96.7% → 100%**（附完整实验记录） |
+| **AI 记忆架构** | 两层：**会话事件流**（可追溯）+ **结论快照**（覆盖式写入，每份报告恒定 1 条有效）；从「对话堆积」改为「维护当前认识」，噪音不再累积 |
+| **可审计** | 结论版本链留痕（`superseded` 软删除）+ 记录「谁/何时/讨论轨迹」，可倒推「这个判定是怎么来的」 |
 | **流式输出** | SSE + 独立线程池 + `try/finally` 保证 `done` 事件；前端用 `fetch` + `ReadableStream` 绕过 EventSource 的鉴权限制 |
 | **Agent 化（L0 → L1）** | 把质检查询封装为 `@Tool`，**控制流从开发者转移到模型**；用 `beforeToolExecution` + `ToolExecutedEventListener` 做**零侵入**轨迹埋点（可扩展） |
 | **安全加固** | 方法级权限（`@PreAuthorize`）替代前端传参判断；JWT 密钥强度启动校验；密码字段 `WRITE_ONLY` 防泄露 |
 | **配置外部化** | 双维度 Profile（环境 `dev/prod` × AI `ollama/cloud`，共 4 种组合）；生产配置**刻意无默认值**，缺失即 fail-fast |
-| **测试与 CI** | 13 个单元测试（覆盖上下文组装、JWT 安全不变量、登录分支）；GitHub Actions 自动验证 |
+| **测试与 CI** | **28 个单元测试 + 8 个集成测试（Testcontainers，真 MySQL/Redis）**；GitHub Actions 自动验证（集成测试打 `@Tag`，CI 跳过） |
 | **数据库迁移** | Flyway 版本化管理表结构；已有库自动 baseline，避免重复建表与手工 SQL 漂移 |
 | **可观测性** | Actuator + Micrometer 导出 Prometheus 指标；只放行 `health`/`prometheus`，其余端点保持认证 |
 | **容器化** | 多阶段构建 + 层缓存优化（先 COPY pom.xml）；前后端镜像均 < 300MB |
@@ -168,6 +171,23 @@ Spring Boot 4.0 把自动配置**拆成了独立模块**。只加第三方库（
 </details>
 
 <details>
+<summary><b>Spring Data Redis 的 cache.clear() 静默失效（框架 bug）</b></summary>
+
+`@CacheEvict(allEntries=true)` 与手动 `cacheManager.getCache("qcDetail").clear()`
+**都静默失败** —— 无异常、无报错，但 Redis 里的 key 没删；而 `evict(key)`（单条 DEL）正常。
+
+排查四个假想敌：① 组合注解没被识别？→ 排除 ② `transactionAware()` 延迟提交？→ 排除
+③ 最小化对比 `evict(key)` ✅ vs `clear()` ❌ → 锁定 ④ 切换 KEYS/SCAN 批处理策略？→ 仍失效，排除
+
+**根因**：Spring Data Redis 3.x+ 默认的 `RedisCacheWriter` 是**批量写入**，
+`clear()` 的批量操作没同步刷到 Redis；`evict(key)` 走即时路径所以正常。
+**解法**：`RedisCacheWriter.create(connectionFactory, b -> b.immediateWrites())`。
+
+**教训**：这是**只有集成测试（真 Redis）才能抓到**的 bug —— 单测 mock 掉缓存，
+永远测不出「清空失效」。
+</details>
+
+<details>
 <summary><b>Docker 镜像推送 SWR 报 manifest 解析失败</b></summary>
 
 Docker 23+ 的 BuildKit 默认给镜像附加 provenance/SBOM 证明，镜像变成多清单索引，部分 registry 无法解析。
@@ -236,7 +256,7 @@ Mate10/
 │   ├── src/main/resources/
 │   │   ├── application*.yml   # 多环境配置（dev/prod × ollama/cloud）
 │   │   └── db/migration/      # Flyway 迁移脚本（V1__init_schema.sql …）
-│   ├── src/test/java/         # 单元测试
+│   ├── src/test/java/         # 单元测试 + 集成测试（Testcontainers）
 │   └── Dockerfile             # 多阶段构建
 ├── mate10-V/                  # 前端（Vue 3 + Vite）
 │   ├── src/
