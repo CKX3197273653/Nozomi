@@ -3,6 +3,7 @@ package org.mate.mate10.controller;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
+import org.mate.mate10.common.CurrentUserProvider;
 import org.springframework.beans.factory.annotation.Value;
 import lombok.extern.slf4j.Slf4j;
 import org.mate.mate10.common.Result;
@@ -40,6 +41,8 @@ public class ChatController {
     private ThreadPoolTaskExecutor streamExecutor;
     @Autowired
     private ChatContextBuilder chatContextBuilder;
+    @Autowired
+    private CurrentUserProvider  currentUser;
 
     @Value("${app.error.detail:false}")
     private boolean errorDetail;
@@ -47,16 +50,27 @@ public class ChatController {
 
     @PostMapping("/ai/chat")
     public Result<Chat> createChat(@RequestBody Chat chat) {
-        return Result.success(chatService.createChat(chat.getUserId(), chat.getTitle()));
+        //会话归属一律登陆态,忽略body里的userId
+        Long userId = currentUser.userIdOrNull();
+        if (userId == null) {
+            return Result.error(401,"未登录");
+        }
+        return Result.success(chatService.createChat(userId, chat.getTitle()));
     }
 
     @PostMapping("/ai/chatRecord")
     public Result<String> chat(@RequestBody ChatRequest request) {
         String message = request.getMessage();
         String mode = request.getMode();
-        Long userId = request.getUserId();
         Long chatId = request.getChatId();
 
+        Long userId = currentUser.userIdOrNull();
+        if (userId == null) {
+            return Result.error(401,"未登录");
+        }
+         if (chatId != null && !canAccessChat(chatId, userId)) {
+             return Result.error(403,"无权访问会话");
+         }
         // 组装上下文
         List<ChatMessage> messages = chatContextBuilder.build(chatId, message, mode);
 
@@ -82,11 +96,21 @@ public class ChatController {
         SseEmitter emitter = new SseEmitter(5 * 60 * 1000L);
         String message = request.getMessage();
         String mode = request.getMode();
-        Long userId = request.getUserId();
         Long chatId = request.getChatId();
+        Long userId = currentUser.userIdOrNull();
 
         //保证 done 只发一次,多条终态路径可能先后触发
         AtomicBoolean finished = new AtomicBoolean(false);
+
+        //流式接口的错误也走SSE约定(发error + done),不返回HTTP 401/403,方法签名也是SseEmitter,而且前端本来就在处理这两个事件,emitter返回前的send会被Spring缓冲,不会丢
+        if (userId == null) {
+            finish(emitter, finished,"未登录,请重新登录");
+            return emitter;
+        }
+        if (chatId != null && !canAccessChat(chatId, userId)) {
+            finish(emitter,finished,"无权访问会话");
+            return emitter;
+        }
 
         //超时也要给前端一个结束信号,否则界面一直转圈
         emitter.onTimeout(() -> {
@@ -94,15 +118,14 @@ public class ChatController {
             finish(emitter, finished, "响应超时，请重试");
         });
 
-        //用户信息
-        if (userId != null && chatId != null) {
-            mongoChatMessageService.saveUserMessage(chatId, userId, message);
-        }
-
         //放进独立线程执行,方法返回 emitter
         streamExecutor.execute(() -> {
             StringBuilder full = new StringBuilder();
             try {
+                //用户消息,再try内抛异常会变成HTTP 500(不走SSE收尾)
+                if (chatId != null) {
+                    mongoChatMessageService.saveUserMessage(chatId, userId, message);
+                }
                 List<ChatMessage> messages = chatContextBuilder.build(chatId, message, mode);
                 chatModelFactory.getStreamingChatModel().chat(messages,
                         new StreamingChatResponseHandler() {
@@ -181,5 +204,12 @@ public class ChatController {
             emitter.complete();
         } catch (Exception ignored) {
         }
+    }
+    private boolean canAccessChat(Long chatId, Long me) {
+        if (currentUser.isAdmin()) {
+            return true;
+        }
+        Chat chat = chatService.getById(chatId);
+        return chat != null && me.equals(chat.getUserId());
     }
 }
