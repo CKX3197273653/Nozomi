@@ -28,7 +28,8 @@ const registerForm = reactive({
   confirmPassword: '',
   email: '',
   phone:'',
-  nickname: ''
+  nickname: '',
+  empNo: ''
 })
 const registerRules = {
   username: [
@@ -53,6 +54,11 @@ const registerRules = {
   ],
   phone:[
     { required: true, validator: validatePhone, trigger: 'blur' }
+  ],
+  empNo: [
+    { required: true, message: '请输入员工工号', trigger: 'blur' },
+    // 格式按名册实际格式定；种子数据是 E10001~E10010
+    { pattern: /^E\d{5}$/, message: '工号格式：E + 5 位数字（如 E10001）', trigger: 'blur' }
   ]
 }
 
@@ -107,7 +113,8 @@ const handleRegister = async () => {
         password: registerForm.password,
         email: registerForm.email,
         nickname: registerForm.nickname,
-        phone:registerForm.phone
+        phone:registerForm.phone,
+        empNo: registerForm.empNo,
       })
       ElMessage.success('注册成功，请登录')
       // 清空表单
@@ -117,6 +124,7 @@ const handleRegister = async () => {
       registerForm.email = ''
       registerForm.nickname = ''
       registerForm.phone=''
+      registerForm.empNo=''
       // 切换到登录标签
       activeTab.value = 'login'
     } catch (error) {
@@ -160,6 +168,9 @@ const handleRegister = async () => {
           <el-form ref="registerFormRef" :model="registerForm" :rules="registerRules">
             <el-form-item prop="username">
               <el-input v-model="registerForm.username" placeholder="请输入用户名" :prefix-icon="User" size="large"/>
+            </el-form-item>
+            <el-form-item prop="empNo">
+              <el-input v-model="registerForm.empNo" placeholder="请输入员工工号" size="large"/>
             </el-form-item>
             <el-form-item prop="password">
               <el-input v-model="registerForm.password" type="password" show-password placeholder="请输入密码" :prefix-icon="Lock" size="large"/>

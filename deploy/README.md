@@ -88,26 +88,61 @@ docker compose ps
 
 ### 5. 数据库初始化（无需手工操作）
 
-**表结构由 Flyway 在 backend 启动时自动创建** ✅
+**表结构由 Flyway 在 backend 启动时自动创建** 
 
 - `MYSQL_DATABASE: mate10db` 已在 compose 中声明 → MySQL 首次启动自动建库
-- backend 启动时 Flyway 接着建表（`sys_user` / `qc_report` / `qc_defect` /
-  `qc_production_param` / `chat` / `chat_record`）
+- backend 启动时 Flyway 按版本顺序执行 `db/migration/` 下的迁移：
+
+  | 版本 | 内容 |
+    |---|---|
+  | `V1__init_schema.sql` | 建表：`sys_user` / `qc_report` / `qc_defect` / `qc_production_param` / `chat` / `chat_record` |
+  | `V2__add_employee_roster.sql` | 员工工号名册 `sys_employee`（注册白名单 + 占用标记）|
+  | `V3__add_user_emp_no.sql` | `sys_user.emp_no`（唯一），绑定注册用户与工号 |
+  | `V4__fix_user_phone_type.sql` | `sys_user.phone` → `VARCHAR(20)` |
+  | `V5__add_user_email_unique.sql` | `sys_user.uk_email` 唯一索引 |
+  | `V6__add_chat_indexes.sql` | `chat.idx_user_id` / `chat.idx_update_time` |
+  | `V7__rename_username_index.sql` | 统一索引命名 `username` → `uk_username` |
+
+-  **开发环境的工号名册种子不会被加载** —— 它在
+  `db/seed-dev/R__seed_employee_roster.sql`，**只在 `dev` profile 加载**
+  （见 `application-dev.yml` 的 `spring.flyway.locations`）
+  **生产环境名册是空的，必须由管理员导入真实员工工号** 
+  （种子工号写在 public 仓库里 = 公开的有效工号，不能进生产）
 
 ```bash
 # 验证 Flyway 是否执行成功
 docker compose logs backend | grep -i flyway
-# 期望：Successfully baselined schema with version: 1
-#   或：Successfully applied 1 migration to schema `mate10db`
+# 全新库期望：Successfully applied N migrations to schema `mate10db`
+#   注意：这里【不会】出现 "Successfully baselined schema" ——
+#   只有"库非空但没有版本表"时才会 baseline
 
-# 查看版本记录表
+#  Spring Boot 集成后，Flyway 的 banner（"Flyway Community Edition ... by Redgate"）
+#    不会出现，别拿它当判据；看 org.flywaydb.core.FlywayExecutor 那一行更可靠
+
+# 最可靠的验收方式：查版本记录表
 docker exec mate10-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" \
-  -e "USE mate10db; SELECT version, description, type, success FROM flyway_schema_history;"
+  -e "USE mate10db; SELECT installed_rank, version, description, type, success FROM flyway_schema_history ORDER BY installed_rank;"
+# 期望：V1~V7 全部 success=1，外加一行 R__（可重复迁移，version 为 NULL）
 ```
 
-> ⚠️ 迁移脚本位于 `mate10/src/main/resources/db/migration/`，会打包进后端镜像。
-> **新增表结构变更请新建 `V2__xxx.sql`，不要修改已执行过的脚本**
-> （校验和变化会导致启动直接失败）。
+>  迁移脚本位于 `mate10/src/main/resources/db/migration/`，会打包进后端镜像。
+> **新增表结构变更请新建 `V8__xxx.sql`，绝不要修改已执行过的脚本**
+> （校验和变化会导致启动直接失败：`Migration checksum mismatch`）。
+
+-  **已应用的迁移就冻结了** —— 改内容（哪怕只改注释/空格）→ **启动失败** 
+  - 这个报错会**伪装成** `Error creating bean with name 'xxxMapper'`
+    —— **真凶永远在最内层的 `Caused by`** 
+  - 修复：新建空库重跑（干净），或
+    `DELETE FROM flyway_schema_history WHERE version='N'` 让它**真正重新应用**
+     **不要用 `flyway repair`** —— 它只改校验和、**不重跑迁移**，
+    会留下"记录说做了、实际没做"的假象
+- ️ **写迁移脚本时不要开着 devtools 自动重启**：
+  `db/migration/*.sql` 不在 devtools 默认排除清单里 →
+  **新建一个还没写完（甚至空的）迁移文件并保存**时应用会立刻重启，
+  把它当正式迁移**应用掉** → 留下 `checksum = 0` 的假迁移 →
+  之后写满内容就 `checksum mismatch` **启动失败**。
+  预防（二选一）：写脚本时先停后端 / 或 `application-dev.yml` 加
+  `spring.devtools.restart.additional-exclude: db/**`（ 是 **additional-exclude**）
 
 ### 6. 验证部署
 
@@ -128,6 +163,16 @@ curl http://localhost:8080/actuator/prometheus | head -20
 
 # 确认其他端点【仍需认证】（应返回 401）
 curl -i http://localhost:8080/actuator/env
+
+#  数据库迁移是否真的跑了（最可靠 —— 直接查库，不需要认证）
+docker compose exec mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" \
+  -e "USE mate10db; SELECT installed_rank, version, description, success FROM flyway_schema_history ORDER BY installed_rank;"
+#  全部 success=1，外加一行 R__（可重复迁移，version 为 NULL）
+# ️ 如果这张表不存在，或者只有一行 BASELINE → Flyway 从未真正工作过
+#    （排查见「踩坑记录 · flyway-core 被标成 test scope」）
+
+# 用 Actuator 看迁移状态 —— ️ 该端点需认证，所以要带 token
+curl -H "Authorization: Bearer <你的token>" http://localhost:8080/actuator/flyway
 ```
 
 ---
@@ -143,7 +188,7 @@ curl -i http://localhost:8080/actuator/env
 | `DEEPSEEK_API_KEY` | ✅ | cloud 模式对话模型 |
 | `ZHIPU_API_KEY` | ✅ | cloud 模式 Embedding |
 | `GRAFANA_PASSWORD` | ✅ | Grafana 管理员密码（用户名固定 `admin`） |
-| `APP_RAG_RERANK_ENABLED` | ⚠️ **建议显式设 `false`** | 不设则默认 `true`，而容器里没有模型文件 → **启动失败**（见「踩坑记录 · Rerank」）|
+| `APP_RAG_RERANK_ENABLED` |  **建议显式设 `false`** | 不设则默认 `true`，而容器里没有模型文件 → **启动失败**（见「踩坑记录 · Rerank」）|
 
 **⚠️ 密码建议用纯字母数字** —— MongoDB 的 URI 里密码需要 URL 编码，
 用特殊字符容易踩坑。
@@ -180,7 +225,6 @@ docker compose down -v
 ---
 
 ## 踩坑记录
-
 ### Kafka：容器内连不上 broker
 
 `advertised.listeners` 默认是 `localhost:9092`，而容器里的 `localhost` 指向**容器自己**。
@@ -251,7 +295,7 @@ docker push --platform linux/amd64 <image>
     <artifactId>flyway-core</artifactId>
 </dependency>
 
-<!-- ✅ 含 spring-boot-flyway（FlywayAutoConfiguration） -->
+<!--  含 spring-boot-flyway（FlywayAutoConfiguration） -->
 <dependency>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-flyway</artifactId>
@@ -270,6 +314,12 @@ docker push --platform linux/amd64 <image>
 | Flyway | flyway-core | spring-boot-flyway |
 | MongoDB | mongodb-driver-sync | spring-boot-data-mongodb |
 | Kafka | kafka-clients | spring-boot-kafka |
+| MyBatis-Plus | mybatis-plus-core 等 | **mybatis-plus-spring-boot4-starter**（SB4 专用）|
+
+> ️ **MyBatis-Plus 还有两个部署侧注意点**（详见 `AGENTS.md`「已知问题」）：
+> 1. **绝不能钉它的内部子模块** —— 曾钉 `mybatis-plus-extension:3.5.7`
+>    与 starter 的 `3.5.16` 混搭（Maven「最近者优先」）→ `IRepository` 找不到；
+> 2.  **3.5.9+ 的分页拦截器在 `mybatis-plus-jsqlparser`**，要单独加、版本与主包一致
 
 **排查方法**：
 
@@ -277,6 +327,43 @@ docker push --platform linux/amd64 <image>
    （**这个警告通常是真的，别急着当成 IDE 缓存问题**）
 2. 查官方文档的「自动配置类」附录，确认模块名
 3. `mvn dependency:tree` 确认模块是否真的被引入
+4. **事后订正**：本项目当年那次"Flyway 不生效"，真正原因是
+> **`flyway-core` 被标成了 `<scope>test</scope>`**（见下一条），
+> 而不是"只加了裸库"。两者都会导致**同样的静默失效**，
+> 所以这条「库 + 集成层」规律依然成立  —— 但排查时**两个都要查** 
+
+###  `flyway-core` 被标成 `test` scope —— Flyway 静默失效
+**现象**：**Flyway 一次都没执行过**，但 backend **启动完全正常、零报错、零日志** ——
+表结构全靠手工建，`flyway_schema_history` 里只有一个早年的 BASELINE 行。
+
+**根因**：`pom.xml` 里 `flyway-core` 被标成了 `<scope>test</scope>` ——
+运行时 classpath 里没有它 → `FlywayAutoConfiguration` 上的
+`@ConditionalOnClass(Flyway.class)` 不满足 → **自动配置被静默跳过**。
+
+**这是上面「SB 4.0 模块化陷阱」的镜像版**：
+那条讲「只加库、缺集成层」；这条是「**有集成层、但库被标成了 test**」——
+**同样静默失效** 
+
+**排查三步（5 分钟）**：
+1. 看**运行进程的 classpath** 里有没有 `flyway-core`
+   —— 「依赖在 pom 里」≠「依赖在运行时 classpath 里」
+2. 看 `flyway_schema_history`：**没有这张表 / 只有 BASELINE 行** = Flyway 从未工作
+3. **换一个空库启动** —— 空库里零张表 = 铁证 
+
+**解法**：删掉 `<scope>test</scope>`（`compile` 也包含测试 classpath，集成测试照常可用）：
+
+```xml
+<dependency>
+    <groupId>org.flywaydb</groupId>
+    <artifactId>flyway-core</artifactId>
+    <version>11.14.1</version>
+    <!-- 不要写 <scope>test</scope> -->
+</dependency>
+```
+
+> 「依赖加了」≠「依赖生效了」。本项目已踩 **3 次**同一类坑
+> （MongoDB 配置未生效 / MyBatis-Plus starter 不匹配 / Flyway 依赖 scope 错），
+> 共同特征都是 **零报错的静默失效** —— 只能靠**观测运行时行为**发现。
 
 ### 前端请求为什么不用改代码
 
@@ -351,7 +438,7 @@ return RedisCacheManager.builder(cacheWriter)   // 用带 writer 的重载
 >
 > 本项目当前 key 只有个位数，**暂时不需要改** ✅ —— 数据量上来（key 上万）再动，且务必按上面两步验证。
 
-### ⚠️ Rerank（精排）：模型缺失会导致容器启动失败
+### ️ Rerank（精排）：模型缺失会导致容器启动失败
 
 **现象**：重新构建镜像部署后，backend 容器**反复重启**，日志里能看到：
 
@@ -402,6 +489,8 @@ docker-compose.yml    既没挂模型卷，也没设 RERANK_MODEL_PATH
 > 关掉后 `HybridRetriever` 自动回退 RRF 融合，命中率 100% → 96.7%（仍可用）。
 
 ---
+
+
 
 ## 监控（Prometheus + Grafana）
 

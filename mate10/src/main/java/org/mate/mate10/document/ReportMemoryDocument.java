@@ -21,6 +21,9 @@ public class ReportMemoryDocument {
     //改进建议
     @Field("advice")
     private String advice;
+    //完整回答
+    @Field("full_answer")
+    private String fullAnswer;
     //质量
     @Field("status")
     private String status;
@@ -33,7 +36,10 @@ public class ReportMemoryDocument {
 
     @Field("analyzed_at")
     private LocalDateTime analyzedAt;
-
-//    @Field("change_reason")
-//    private String changeReason;
+    //结论基于的数据指纹
+    @Field("data_version")
+    private String dataVersion;
+    //覆盖原因
+    @Field("change_reason")
+    private String changeReason;
 }

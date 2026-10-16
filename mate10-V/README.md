@@ -5,16 +5,17 @@
 
 ## 功能页面
 
-| 路由 | 页面 | 说明 |
-| --- | --- | --- |
-| `/login` | 登录 | 用户名密码登录，token 存 `localStorage` |
-| `/dashboard` | 质检仪表盘 | 报告/缺陷/产线概览统计 |
-| `/report` | 报告管理 | 上传质检报告、状态流转、查看 AI 分析缺陷、根因分析 |
-| `/defect` | 缺陷分析 | 缺陷列表、类型/严重程度统计、人工确认 |
-| `/trend` | 趋势分析 | 按天/产线/批次缺陷趋势图表 |
-| `/visual3d` | 3D 可视化 | Three.js 工件三维模型 + 缺陷点渲染与交互 |
-| `/qa` | 知识问答 | RAG 质检助手对话、初始化知识库、上传知识文档 |
-| `/agent` | **质检 Agent** | 模型自主调用工具做根因分析，**实时展示工具调用轨迹** |
+| 路由           | 页面           | 说明 |
+|--------------|--------------| --- |
+| `/login`     | 登录           | 用户名密码登录，token 存 `localStorage` |
+| `/register`     | 注册           | 注明「登录页含注册 tab」+ api/chat.js 注释细化 |
+| `/dashboard` | 质检仪表盘        | 报告/缺陷/产线概览统计 |
+| `/report`    | 报告管理         | 上传质检报告、状态流转、查看 AI 分析缺陷、根因分析 |
+| `/defect`    | 缺陷分析         | 缺陷列表、类型/严重程度统计、人工确认 |
+| `/trend`     | 趋势分析         | 按天/产线/批次缺陷趋势图表 |
+| `/visual3d`  | 3D 可视化       | Three.js 工件三维模型 + 缺陷点渲染与交互 |
+| `/qa`        | 知识问答         | RAG 质检助手对话、初始化知识库、上传知识文档 |
+| `/agent`     | **质检 Agent** | 模型自主调用工具做根因分析，**实时展示工具调用轨迹** |
 
 整体为**智能质检分析平台**（深色背景 + 侧边菜单 + 顶栏），所有业务页共用主布局 `layout/index.vue`。
 
@@ -117,8 +118,11 @@ mate10-v/
   用原生 `fetch` + `ReadableStream` —— 因为 SSE 响应是裸文本流（没有 `{code,msg,data}` 结构），
   且 `EventSource` 无法携带 `Authorization` 头。
 
-> ⚠️ **SSE 多行 data 必须用 `\n` 拼回**：后端 `message` 事件含换行的 Markdown，
+> **SSE 多行 data 必须用 `\n` 拼回**：后端 `message` 事件含换行的 Markdown，
 > 会被 SSE 规范拆成多个 `data:` 行。若直接拼接（`data += line`）会**丢掉换行**，
-> 结论会显示成一整行。正确做法见 `api/agent.js` 的 `dataLines.join('\n')`。
+> 结论会显示成一整行。
+> > **两个流式接口都要遵守**：
+> - `api/agent.js` —— （`dataLines.join('\n')`）
+> - `api/chat.js`  —— （`data += line.slice(5)`），
 
 - 对应后端接口说明请见后端项目 [`../mate10/README.md`](../mate10/README.md)。

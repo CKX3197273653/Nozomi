@@ -1,13 +1,13 @@
 package org.mate.mate10.controller.qc;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.mate.mate10.common.Result;
 import org.mate.mate10.dto.ReportAuditDTO;
 import org.mate.mate10.entity.qc.QcReport;
 import org.mate.mate10.service.ReportAuditService;
 import org.mate.mate10.service.qc.QcReportService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -38,6 +38,7 @@ public class QcReportController {
     }
 
     //创建报告
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/create")
     public Result<Long> createReport(@RequestBody QcReport report) {
         //校验
@@ -127,6 +128,7 @@ public class QcReportController {
         }
     }
         //更新报告
+    @PreAuthorize("hasRole('ADMIN')")
     @PutMapping("/{id}/status")
     public Result<Void> updateStatus(@PathVariable Long id,
     @RequestParam String status) {
@@ -137,6 +139,7 @@ public class QcReportController {
         return Result.success();
     }
     //删除报告
+    @PreAuthorize("hasRole('ADMIN')")
     @DeleteMapping("/{id}")
     public Result<Void> deleteReport(@PathVariable Long id) {
         boolean success = qcReportService.deleteReport(id);

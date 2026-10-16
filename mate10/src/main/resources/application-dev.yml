@@ -21,6 +21,11 @@ spring:
       password: root
   kafka:
     bootstrap-servers: localhost:9094
+  flyway:
+    locations: classpath:db/migration,classpath:db/seed-dev
+  devtools:
+    restart:
+      additional-exclude: db/**
 
 milvus:
   host: 127.0.0.1
@@ -32,6 +37,10 @@ tesseract:
   path: ${TESSERACT_PATH:I:\OCR\tesseract-main}
   data-path: ${TESSERACT_DATA_PATH:I:\OCR\tesseract-main\tessdata}
 
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
 app:
   error:
     detail: true
@@ -41,7 +50,7 @@ logging:
     root: info
     org.mate.mate10: DEBUG
 
-  management:
-    endpoint:
-      health:
-        show-details: always
+management:
+  endpoint:
+    health:
+      show-details: always

@@ -3,6 +3,7 @@ package org.mate.mate10.service.Impl;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mate.mate10.entity.SysUser;
+import org.mate.mate10.mapper.SysEmployeeMapper;
 import org.mate.mate10.mapper.SysUserMapper;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
@@ -14,10 +15,11 @@ class SysUserServiceImplTest {
     // 两个依赖都 mock
     private final SysUserMapper sysUserMapper = mock(SysUserMapper.class);
     private final PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
+    private final SysEmployeeMapper  sysEmployeeMapper = mock(SysEmployeeMapper.class);
 
     // 构造器是包级私有
     private final SysUserServiceImpl service =
-            new SysUserServiceImpl(sysUserMapper, passwordEncoder);
+            new SysUserServiceImpl(sysUserMapper, passwordEncoder, sysEmployeeMapper);
 
     @Test
     @DisplayName("正常路径：用户存在 + 密码正确 + 状态正常 → 返回用户")

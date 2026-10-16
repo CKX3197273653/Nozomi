@@ -19,6 +19,12 @@ public class GlobalExceptionHandler {
     @Value("${app.error.detail:false}")
     private boolean errorDetail;
 
+    @ExceptionHandler(RegisterRejectedException.class)
+    public Result<?> handleRegisterRejected(RegisterRejectedException e) {
+        log.warn("注册被拒绝: {}", e.getMessage());
+        return Result.error(400, e.getMessage());
+    }
+
     //参数校验失败
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public Result<?> handleValidation(MethodArgumentNotValidException e) {

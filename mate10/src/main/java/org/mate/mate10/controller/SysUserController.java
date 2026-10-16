@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
+import org.mate.mate10.dto.RegisterRequest;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -52,39 +53,16 @@ public class SysUserController {
     }
 
     @PostMapping("/register")
-    public Result<?> register(@RequestBody SysUser sysUser){
-        if (!StringUtils.hasText(sysUser.getUsername()) || !StringUtils.hasText(sysUser.getPassword())){
-            return Result.error("用户名和密码不能为空");
-        }
-        
-        // 检查用户名是否已存在
-        if (sysUserService.existsByUsername(sysUser.getUsername())) {
-            return Result.error("用户名已存在");
-        }
-        
-        // 检查邮箱是否已存在（如果提供了邮箱）
-        if (StringUtils.hasText(sysUser.getEmail()) && sysUserService.existsByEmail(sysUser.getEmail())) {
-            return Result.error("邮箱已被注册");
-        }
-        //昵称检查
-        if (sysUserService.existsByNickname(sysUser.getNickname())) {
-            return Result.error("昵称已存在");
-        }
-        //手机号检查
-        if (sysUserService.existsByPhone(sysUser.getPhone())) {
-            return Result.error("手机号已存在");
-        }
-        // 设置默认值
-        sysUser.setStatus(1); // 默认启用
-        sysUser.setUserRole(2); // 默认普通用户
-        
-        // 注册用户
-        boolean success = sysUserService.addUser(sysUser);
-        if (success) {
-            return Result.success("注册成功");
-        } else {
-            return Result.error("注册失败，请重试");
-        }
+    public Result<?> register(@RequestBody RegisterRequest req) {
+        SysUser user = new SysUser();
+        user.setUsername(req.getUsername());
+        user.setPassword(req.getPassword());
+        user.setNickname(req.getNickname());
+        user.setPhone(req.getPhone());
+        user.setEmail(req.getEmail());
+
+        sysUserService.registerByRoster(user, req.getEmpNo());
+        return Result.success("注册成功");
     }
 
     @PreAuthorize("hasRole('ADMIN')")

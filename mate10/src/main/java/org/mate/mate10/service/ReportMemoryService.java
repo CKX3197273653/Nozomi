@@ -6,7 +6,7 @@ import java.util.List;
 
 public interface ReportMemoryService {
     //从Agent回答中蒸馏结论并覆盖,非报告分析自动忽略
-    void saveConclusion(String reportNo, String answer, Long userId);
+    String saveConclusion(String reportNo, String answer, Long userId, String dataVersion);
 
     //取报告的当前有效结论,没有返回null
     ReportMemoryDocument getCurrent(String reportNo);

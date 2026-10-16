@@ -41,15 +41,19 @@ export async function chatStream(data, onChunk) {
             buffer = buffer.slice(idx + 2)
 
             let eventName = 'message'
-            let data = ''
-            for (const line of raw.split('\n')) {
-                if (line.startsWith('event:')) {
-                    eventName = line.slice(6).trim()
-                } else if (line.startsWith('data:')) {
-                    data += line.slice(5)
-                }
-            }
-            if (eventName === 'done') {
+            const dataLines = []
+
+           for (const line of raw.split('\n')) {
+               if (line.startsWith('event:')) {
+                   eventName = line.slice(6).trim()
+               }else if(line.startsWith('data:')){
+                   //SSE规范,含换行的data会被拆成多个`data行`,先收集最后用\n拼,直接+=会丢掉所有换行,单行时去掉冒号后可选的一个空格,和api/agent.js保持一致
+                   dataLines.push(line.slice(5).replace(/^ /, ''))
+               }
+           }
+           const data = dataLines.join('\n')
+
+            if (eventName === 'done'){
                 reader.cancel()
                 return
             }

@@ -68,6 +68,8 @@ public class ReportAuditServiceImpl implements ReportAuditService {
                 .superseded(d.getSuperseded())
                 .analyzedBy(d.getAnalyzedBy())
                 .analyzedAt(d.getAnalyzedAt())
+                .dataVersion(d.getDataVersion())
+                .changeReason(d.getChangeReason())
                 .build();
     }
 

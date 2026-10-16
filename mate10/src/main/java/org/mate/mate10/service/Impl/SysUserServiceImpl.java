@@ -2,6 +2,7 @@ package org.mate.mate10.service.Impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import lombok.extern.slf4j.Slf4j;
 import org.mate.mate10.entity.SysUser;
 import org.mate.mate10.mapper.SysUserMapper;
 import org.mate.mate10.service.SysUserService;
@@ -10,16 +11,22 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.mate.mate10.common.RegisterRejectedException;
+import org.mate.mate10.mapper.SysEmployeeMapper;
+import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser>
         implements SysUserService {
     private final SysUserMapper sysUserMapper;
     private final PasswordEncoder passwordEncoder;
+    private final SysEmployeeMapper sysEmployeeMapper;
 @Autowired
-SysUserServiceImpl(SysUserMapper sysUserMapper,PasswordEncoder passwordEncoder){
+SysUserServiceImpl(SysUserMapper sysUserMapper,PasswordEncoder passwordEncoder,  SysEmployeeMapper sysEmployeeMapper){
     this.sysUserMapper = sysUserMapper;
     this.passwordEncoder = passwordEncoder;
+    this.sysEmployeeMapper = sysEmployeeMapper;
 }
     // 登录
     @Override
@@ -64,6 +71,51 @@ SysUserServiceImpl(SysUserMapper sysUserMapper,PasswordEncoder passwordEncoder){
         sysUser.setPassword(passwordEncoder.encode(sysUser.getPassword()));
         sysUser.setStatus(1);
         return save(sysUser);
+    }
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Long registerByRoster(SysUser user, String empNo) {
+        //入参校验
+        if (!StringUtils.hasText(user.getUsername()) || !StringUtils.hasText(user.getPassword())) {
+            throw new RegisterRejectedException("用户名和密码不能为空");
+        }
+        if (!StringUtils.hasText(empNo)) {
+            throw new RegisterRejectedException("员工工号不能为空");
+        }
+        String no = empNo.trim();
+
+        //② 唯一性校验（给用户友好提示;真正的兜底靠数据库唯一索引）
+        if (isUsernameDuplicate(user.getUsername(), null)) {
+            throw new RegisterRejectedException("用户名已存在");
+        }
+        if (existsByEmail(user.getEmail())) {
+            throw new RegisterRejectedException("邮箱已被注册");
+        }
+        if (existsByNickname(user.getNickname())) {
+            throw new RegisterRejectedException("昵称已存在");
+        }
+        if (existsByPhone(user.getPhone())) {
+            throw new RegisterRejectedException("手机号已存在");
+        }
+
+        //服务端强制默认值 —— 【绝不信任客户端传来的 role / status / id】
+        user.setId(null);              // ⚠防止客户端塞 id 覆盖已有用户
+        user.setEmpNo(no);
+        user.setStatus(1);
+        user.setUserRole(2);
+        user.setPassword(passwordEncoder.encode(user.getPassword()));
+
+        if (!save(user)) {
+            throw new RegisterRejectedException("注册失败，请重试");
+        }
+
+        //原子占用工号
+        if (sysEmployeeMapper.occupy(no, user.getId()) == 0) {
+            throw new RegisterRejectedException("工号不存在或已被注册，请联系管理员");
+        }
+
+        log.info("[Register] 员工自助注册成功 userId={} empNo={}", user.getId(), no);
+        return user.getId();
     }
     //改
     @Override

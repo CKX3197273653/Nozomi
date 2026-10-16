@@ -1,16 +1,18 @@
 package org.mate.mate10.entity;
 
+import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
+import java.math.BigInteger;
 import java.time.LocalDateTime;
 @Data
 @TableName("sys_user")
 public class SysUser {
-    @TableId
+    @TableId(type = IdType.AUTO)
     private Long id;
     @TableField("username")
     private String username;
@@ -33,4 +35,6 @@ public class SysUser {
     private LocalDateTime updateTime;
     @TableField("role")
     private int userRole;
+    @TableField("emp_no")
+    private String empNo;
 }

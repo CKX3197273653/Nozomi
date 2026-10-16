@@ -24,4 +24,6 @@ public interface SysUserService extends IService<SysUser> {
     boolean existsByPhone(String phone);
 
     boolean existsByNickname(String nickname);
+
+    Long registerByRoster(SysUser user, String empNo);
 }

@@ -25,6 +25,8 @@ public class ReportAuditDTO {
         private Boolean superseded;
         private Long analyzedBy;
         private LocalDateTime analyzedAt;
+        private String dataVersion;
+        private String changeReason;
     }
 
     @Data
