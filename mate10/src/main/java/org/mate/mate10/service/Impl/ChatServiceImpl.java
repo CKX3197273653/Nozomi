@@ -33,36 +33,4 @@ public class ChatServiceImpl extends ServiceImpl<ChatMapper, Chat> implements Ch
         save(chat);
         return  chat;
     }
-    @Override
-    public List<Chat> getUserChats(Long userId) {
-        return baseMapper.selectByUserId(userId);
-    }
-    @Override
-    public Map<String, Object> getChatDetail(Long chatId) {
-        Map<String, Object> result = new HashMap<>();
-        Chat chat = getById(chatId);
-        result.put("chat", chat);
-
-        List<ChatRecord> messages = chatRecordService.getChatMessages(chatId);
-        result.put("messages", messages);
-
-        return result;
-    }
-    @Override
-    public boolean updateChatTitle(Long chatId, String title) {
-        Chat chat = new Chat();
-        chat.setId(chatId);
-        chat.setTitle(title);
-        chat.setUpdateTime(LocalDateTime.now());
-        return updateById(chat);
-    }
-
-    @Override
-    public boolean deleteChat(Long chatId) {
-        chatRecordMapper.deleteByChatId(chatId);
-        return removeById(chatId);
-    }
-
-
-
 }

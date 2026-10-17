@@ -8,13 +8,4 @@ import java.util.Map;
 
 public interface ChatService extends IService<Chat> {
     Chat createChat(Long userId, String title);
-
-    List<Chat> getUserChats(Long userId);
-
-    Map<String,Object> getChatDetail(Long chatId);
-
-    boolean updateChatTitle(Long chatId,String title);
-
-    boolean deleteChat(Long chatId);
-
 }
