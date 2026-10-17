@@ -3,6 +3,7 @@ package org.mate.mate10.service.Impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.extern.slf4j.Slf4j;
+import org.mate.mate10.common.PasswordPolicy;
 import org.mate.mate10.entity.SysUser;
 import org.mate.mate10.mapper.SysUserMapper;
 import org.mate.mate10.service.SysUserService;
@@ -68,6 +69,10 @@ SysUserServiceImpl(SysUserMapper sysUserMapper,PasswordEncoder passwordEncoder, 
         if (isUsernameDuplicate(sysUser.getUsername(), null)) {
             return false;
         }
+        String pwdErr = PasswordPolicy.validate(sysUser.getPassword());
+        if (pwdErr != null) {
+            return false;
+        }
         sysUser.setPassword(passwordEncoder.encode(sysUser.getPassword()));
         sysUser.setStatus(1);
         return save(sysUser);
@@ -76,12 +81,29 @@ SysUserServiceImpl(SysUserMapper sysUserMapper,PasswordEncoder passwordEncoder, 
     @Transactional(rollbackFor = Exception.class)
     public Long registerByRoster(SysUser user, String empNo) {
         //入参校验
-        if (!StringUtils.hasText(user.getUsername()) || !StringUtils.hasText(user.getPassword())) {
-            throw new RegisterRejectedException("用户名和密码不能为空");
+        //入参校验 —— 注册是【一刀切】:表单上有的框都必须填
+        if (!StringUtils.hasText(user.getUsername())) {
+            throw new RegisterRejectedException("用户名不能为空");
+        }
+        if (!StringUtils.hasText(user.getNickname())) {
+            throw new RegisterRejectedException("昵称不能为空");
+        }
+        if (!StringUtils.hasText(user.getPhone())) {
+            throw new RegisterRejectedException("手机号不能为空");
+        }
+        if (!StringUtils.hasText(user.getEmail())) {
+            throw new RegisterRejectedException("邮箱不能为空");
         }
         if (!StringUtils.hasText(empNo)) {
             throw new RegisterRejectedException("员工工号不能为空");
         }
+        //密码规则(非空 + 8~16 + 无空格)
+        String pwdErr = PasswordPolicy.validate(user.getPassword());
+        if (pwdErr != null) {
+            throw new RegisterRejectedException(pwdErr);
+        }
+
+
         String no = empNo.trim();
 
         //② 唯一性校验（给用户友好提示;真正的兜底靠数据库唯一索引）
@@ -127,12 +149,20 @@ SysUserServiceImpl(SysUserMapper sysUserMapper,PasswordEncoder passwordEncoder, 
         if (existUser == null) {
             return false;
         }
+
         if (!existUser.getUsername().equals(sysUser.getUsername())) {
-            if (isUsernameDuplicate(sysUser.getUsername(), sysUser.getId())) {
+            if (isUsernameDuplicate(sysUser.getUsername(), existUser.getId())) {
                 return false;
             }
         }
-        return updateById(sysUser);
+        //白名单只润许这几个字段,password根本不参与,不会被覆盖
+        SysUser patch = new SysUser();
+        patch.setId(sysUser.getId());
+        patch.setUsername(sysUser.getUsername());
+        patch.setNickname(sysUser.getNickname());
+        patch.setPhone(sysUser.getPhone());
+        patch.setEmail(sysUser.getEmail());
+        return updateById(patch);
     }
 
     @Override
@@ -231,4 +261,33 @@ SysUserServiceImpl(SysUserMapper sysUserMapper,PasswordEncoder passwordEncoder, 
         }
         return removeById(userId);
     }
+
+    @Override
+    public boolean resetPassword(Long userId, String newPassword) {
+        if (userId == null || !StringUtils.hasText(newPassword)) {
+            return false;
+        }
+        if (getById(userId) == null) {
+            return false;
+        }
+        SysUser patch = new  SysUser();
+        patch.setId(userId);
+        patch.setPassword(passwordEncoder.encode(newPassword));
+        return updateById(patch);
+    }
+
+    @Override
+    public boolean updateRole(Long userId, Integer role) {
+    if (userId == null ||  role == null) {
+        return false;
+    }
+    if (getById(userId) == null) {
+        return  false;
+    }
+    SysUser patch = new  SysUser();
+    patch.setId(userId);
+    patch.setUserRole(role);
+    return updateById(patch);
+    }
+
 }

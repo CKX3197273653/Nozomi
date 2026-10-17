@@ -26,4 +26,8 @@ public interface SysUserService extends IService<SysUser> {
     boolean existsByNickname(String nickname);
 
     Long registerByRoster(SysUser user, String empNo);
+
+    boolean resetPassword(Long userId,String newPassword);
+
+    boolean updateRole(Long userId,Integer newRole);
 }
