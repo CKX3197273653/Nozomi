@@ -63,19 +63,33 @@ public class ChatContextBuilder {
                 messageService.getRecentMessages(chatId, chatProperties.getMaxHistoryMessages());
 
         List<ChatMessage> picked = new ArrayList<>();
+        int budget = chatProperties.getMaxHistoryChars();
+        int cap = Math.max(1,budget / 2);
         int used = 0;
+
         for (int i = history.size() - 1; i >= 0; i--) {
-            String content = history.get(i).getContent();
+            ChatMessageDocument doc = history.get(i);
+            String content = doc.getContent();
             if (content == null || content.isBlank()) {
                 continue;
             }
-            if (used + content.length() > chatProperties.getMaxHistoryChars()) {
+            int remain = budget - used;
+            if (remain <= 0) {
                 break;
             }
+            if (content.length() > cap) {
+                content = "…" + content.substring(content.length() - cap);
+            }
+            if (content.length() > remain) {
+                content = "…" + content.substring(content.length() - remain);
+            }
             used += content.length();
-            picked.add(toMessage(history.get(i)));
+            picked.add(toMessage(content, doc.getRole()));
         }
+
         Collections.reverse(picked);
+
+
         log.info("组装上下文：历史 {} 条，约 {} 字符", picked.size(), used);
         return picked;
     }
@@ -151,14 +165,26 @@ public class ChatContextBuilder {
 
     private String joinWithBudget(List<ChatMessageDocument> docs, int budget) {
         List<String> picked = new ArrayList<>();
+        int cap = Math.max(1, budget / 2);
         int used = 0;
         for (int i = docs.size() - 1; i >= 0; i--) {            // 从新到旧
+            ChatMessageDocument doc = docs.get(i);
             String content = docs.get(i).getContent();
             if (content == null || content.isBlank()) continue;
-            if (used + content.length() > budget) break;        // 预算不够丢最旧的
+            int remain = budget - used;
+            if (remain <= 0)break;
+            if (content.length() > cap) {
+                content = "…" + content.substring(content.length() - cap);
+            }
+            if (content.length() > remain) {
+                content = "…" + content.substring(content.length() - remain);
+            }
             used += content.length();
             picked.add(prefix(docs.get(i)) + content);
         }
+
+
+
         Collections.reverse(picked);                            // 恢复时间正序
         log.info("组装 Agent 历史（会话）：{} 条，约 {} 字符", picked.size(), used);
         return String.join("\n\n", picked);
@@ -169,11 +195,13 @@ public class ChatContextBuilder {
     }
 
     //共用小工具
-
     private ChatMessage toMessage(ChatMessageDocument doc) {
-        return isAi(doc.getRole())
-                ? AiMessage.from(doc.getContent())
-                : UserMessage.from(doc.getContent());
+        return toMessage(doc.getContent(), doc.getRole());
+    }
+    private ChatMessage toMessage(String content, String role) {
+        return isAi(role)
+                ? AiMessage.from(content)
+                : UserMessage.from(content);
     }
 
     private boolean isAi(String role) {
