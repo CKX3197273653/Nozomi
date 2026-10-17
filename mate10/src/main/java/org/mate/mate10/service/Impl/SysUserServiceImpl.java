@@ -250,16 +250,28 @@ SysUserServiceImpl(SysUserMapper sysUserMapper,PasswordEncoder passwordEncoder, 
         return updateById(updateUser);
     }
 
-    // 删
     @Override
-    public boolean deleteUser(Long userId) {
+    public boolean enableUser(Long userId) {
         if (userId == null) {
             return false;
         }
-        if (getById(userId) == null) {
+        SysUser existUser = getById(userId);
+        if (existUser == null) {
             return false;
         }
-        return removeById(userId);
+        if (existUser.getStatus() != null && existUser.getStatus() == 1) {
+            return false;
+        }
+        SysUser patch = new SysUser();
+        patch.setId(userId);
+        patch.setStatus(1);
+        return updateById(patch);
+    }
+
+    // 删
+    @Override
+    public boolean deleteUser(Long userId) {
+        return disableUser(userId);
     }
 
     @Override

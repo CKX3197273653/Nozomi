@@ -16,6 +16,8 @@ public interface SysUserService extends IService<SysUser> {
 
     boolean deleteUser(Long userId);
 
+    boolean enableUser(Long userId);
+
     boolean existsByUsername(String username);
 
     boolean existsByEmail(String email);
@@ -30,4 +32,5 @@ public interface SysUserService extends IService<SysUser> {
     boolean resetPassword(Long userId,String newPassword);
 
     boolean updateRole(Long userId,Integer newRole);
+
 }

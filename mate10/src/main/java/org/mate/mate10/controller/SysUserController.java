@@ -26,6 +26,7 @@ public class SysUserController {
     private CurrentUserProvider currentUser;
     private final JwtUtil jwtUtil;
 
+
     public SysUserController(SysUserService sysUserService, JwtUtil jwtUtil) {
         this.sysUserService = sysUserService;
         this.jwtUtil = jwtUtil;
@@ -150,22 +151,42 @@ public class SysUserController {
     @PreAuthorize("hasRole('ADMIN')")
     @PutMapping("/disable/{userId}")
     public Result<?> disableUser(@PathVariable Long userId) {
+        Long me = currentUser.userIdOrNull();
+        if (me != null && me.equals(userId)) {
+            return Result.error("不能禁用自己");
+        }
         boolean success = sysUserService.disableUser(userId);
         if (success) {
-            return Result.success();
-        } else {
-            return Result.error("禁用失败,用户不能不存在,也可能被禁用过了");
+            log.info("[Admin] {} 禁用了 userId={}", me, userId);
+            return Result.success("已禁用（30 秒内生效，可用启用接口恢复）");
         }
+        return Result.error("禁用失败：用户不存在，或已是禁用状态");
+    }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @PutMapping("/enable/{userId}")
+    public Result<?> enableUser(@PathVariable Long userId) {
+        boolean success = sysUserService.enableUser(userId);
+        if (!success) {
+            return Result.error("启用失败:用户不存在或已是正常状态");
+        }
+        log.info("[Admin] {} 启用了 userId={}", currentUser.userIdOrNull(), userId);
+        return Result.success("已启用（30 秒内生效）");
     }
 
     @PreAuthorize("hasRole('ADMIN')")
     @DeleteMapping("/delete/{userId}")
     public Result<?> deleteUser(@PathVariable Long userId) {
+        Long me = currentUser.userIdOrNull();
+        if (me != null && me.equals(userId)) {
+            return Result.error("不能删除自己");
+        }
         boolean success = sysUserService.deleteUser(userId);
         if (success) {
+            log.info("[Admin] {} 删除了 userId={}", me, userId);
             return Result.success();
         } else {
-            return Result.error("删除失败,用户不存在,也不能空删除");
+            return Result.error("删除失败：用户不存在，或已是禁用状态");
         }
     }
 
