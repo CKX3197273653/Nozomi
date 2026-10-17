@@ -5,6 +5,8 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.mate.mate10.entity.SysUser;
+import org.mate.mate10.mapper.SysUserMapper;
 import org.mate.mate10.util.JwtUtil;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -16,13 +18,35 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
+    //本地缓存30S
+    private static final long USER_CACHE_TTL_MS = 30_000L;
     private final JwtUtil jwtUtil;
+    private final SysUserMapper sysUserMapper;
+    //过期时间戳
+    private final Map<String, Object[]> userCache = new ConcurrentHashMap<>();
 
-    public JwtAuthenticationFilter(JwtUtil jwtUtil) {
+    public JwtAuthenticationFilter(JwtUtil jwtUtil, SysUserMapper sysUserMapper) {
         this.jwtUtil = jwtUtil;
+        this.sysUserMapper = sysUserMapper;
     }
+
+    private SysUser loadUser(String username) {
+        long now = System.currentTimeMillis();
+        Object[] cache = userCache.get(username);
+        if (cache != null && (Long) cache[1] > now) {
+            return (SysUser) cache[0];
+        }
+        SysUser user = sysUserMapper.selectByUsernameOrEmail(username);
+        userCache.put(username, new Object[]{user, now + USER_CACHE_TTL_MS});
+        return user;
+    }
+
+
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
@@ -41,21 +65,34 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 Claims claims = jwtUtil.parseToken(token);
 
                 String username = claims.get("username", String.class);
-                Integer role = claims.get("role", Integer.class);
-
+//                Integer role = claims.get("role", Integer.class);
                 if (username != null) {
-                    // 构造认证信息（角色可以按需扩展）
+                    SysUser user = loadUser(username);
+                    if (user == null || user.getStatus() == null || user.getStatus() == 0) {
+                        SecurityContextHolder.clearContext();
+                        filterChain.doFilter(request, response);
+                        return;
+                    }
+                    //角色用数据库中的,不用token的,降级会直接生效,老token里的ADMIN不会再生效
+                    Integer dbRole = user.getUserRole();
                     List<SimpleGrantedAuthority> authorities = new ArrayList<>();
                     authorities.add(new SimpleGrantedAuthority(
-                            (role != null && role == 1) ? "ROLE_ADMIN" : "ROLE_USER"));
+                            (dbRole != null && dbRole == 1) ? "ROLE_ADMIN" : "ROLE_USER"));
+
+
+                    // 构造认证信息（角色可以按需扩展）
+//                    List<SimpleGrantedAuthority> authorities = new ArrayList<>();
+//                    authorities.add(new SimpleGrantedAuthority(
+//                            (role != null && role == 1) ? "ROLE_ADMIN" : "ROLE_USER"));
 
                     UsernamePasswordAuthenticationToken authentication =
                             new UsernamePasswordAuthenticationToken(username, null, authorities);
                     authentication.setDetails(
                             new WebAuthenticationDetailsSource().buildDetails(request));
 
-                    // 放入安全上下文 → 后续授权规则就能识别"已登录"
+//                    放入安全上下文 → 后续授权规则就能识别"已登录"
                     SecurityContextHolder.getContext().setAuthentication(authentication);
+
                 }
             } catch (Exception e) {
                 // token 无效或过期：不设置认证信息，让后面的授权规则拒绝
