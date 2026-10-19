@@ -8,4 +8,5 @@ public interface QcProductionParamService {
     boolean updateParam(QcProductionParam param);
 
     QcProductionParam getByReportId(Long reportId);
-}
+    //报告批量删除参数
+    int deleteByReportId(Long reportId);}

@@ -63,11 +63,29 @@ public class KafkaConfig {
     }
 
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFactory() {
+    public org.springframework.kafka.listener.DefaultErrorHandler kafkaErrorHandler(KafkaTemplate<String, String> kafkaTemplate) {
+        org.springframework.kafka.listener.DeadLetterPublishingRecoverer recoverer =
+                new org.springframework.kafka.listener.DeadLetterPublishingRecoverer(kafkaTemplate);
+        //重试 3次(每次间隔1S)->不行进死信
+        org.springframework.kafka.listener.DefaultErrorHandler handler =
+                new org.springframework.kafka.listener.DefaultErrorHandler(
+                        recoverer, new org.springframework.util.backoff.FixedBackOff(1000L, 3L));
+        //消息本身有问题,重试再多次没有用 -> 直接进死信.
+        handler.addNotRetryableExceptions(
+                IllegalArgumentException.class,
+                com.fasterxml.jackson.core.JsonProcessingException.class);
+        return handler;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFactory(
+            org.springframework.kafka.listener.DefaultErrorHandler kafkaErrorHandler) {
         ConcurrentKafkaListenerContainerFactory<String, String> factory =
-            new ConcurrentKafkaListenerContainerFactory<>();
+                new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory());
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
+        //挂上错误处理器,失败进 qc-report-topic.DLT
+        factory.setCommonErrorHandler(kafkaErrorHandler);
         //MANUAL_IMMEDIATE手动提交且立刻提交 , AUTO自动提交,由后台线程自动提交
         factory.setConcurrency(3);
         return factory;

@@ -31,4 +31,14 @@ public class QcProductionParamServiceImpl implements QcProductionParamService {
     public QcProductionParam getByReportId(Long reportId) {
         return qcProductionParamMapper.selectByReportId(reportId);
     }
+    @Override
+    @EvictQcCache
+    public int deleteByReportId(Long reportId) {
+        if (reportId == null) {
+            return 0;
+        }
+        return qcProductionParamMapper.delete(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<QcProductionParam>()
+                        .eq(QcProductionParam::getReportId, reportId));
+    }
 }
