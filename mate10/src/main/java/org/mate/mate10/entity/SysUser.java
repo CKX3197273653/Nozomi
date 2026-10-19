@@ -34,7 +34,9 @@ public class SysUser {
     @TableField("updateTime")
     private LocalDateTime updateTime;
     @TableField("role")
-    private int userRole;
+    private Integer userRole;
     @TableField("emp_no")
     private String empNo;
+    //token版本号,更改密码/重置/禁用时自增会使旧token失效
+    private Integer tokenVersion;
 }

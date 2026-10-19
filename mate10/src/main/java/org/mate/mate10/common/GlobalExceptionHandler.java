@@ -32,20 +32,26 @@ public class GlobalExceptionHandler {
                 .map(f -> f.getField() + " " + f.getDefaultMessage())
                 .collect(Collectors.joining("; "));
         log.warn("参数校验失败: {}", msg);
-        return Result.error("参数校验失败: " + msg);
+        return Result.error(400, "参数校验失败: " + msg);
     }
     //缺少必填参数
     @ExceptionHandler(MissingServletRequestParameterException.class)
     public Result<?> handleMissingParam(MissingServletRequestParameterException e) {
         log.warn("缺少必填参数: {}", e.getParameterName());
-        return Result.error("缺少必填参数: " + e.getParameterName());
+        return Result.error(400,"缺少必填参数: " + e.getParameterName());
+    }
+    @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
+    public Result<?> handleTypeMismatch(
+            org.springframework.web.method.annotation.MethodArgumentTypeMismatchException e) {
+        log.warn("参数类型错误: {}={}", e.getName(), e.getValue());
+        return Result.error(400, "参数类型错误: " + e.getName());
     }
 
     //请求体格式错误
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public Result<?> handleNotReadable(HttpMessageNotReadableException e) {
         log.warn("请求体格式错误: {}", e.getMessage());
-        return Result.error("请求体格式错误，请检查 JSON 格式");
+        return Result.error(400,"请求体格式错误，请检查 JSON 格式");
     }
     //接口不存在
     @ExceptionHandler(NoResourceFoundException.class)

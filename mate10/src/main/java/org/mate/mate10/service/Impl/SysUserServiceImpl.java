@@ -221,15 +221,14 @@ SysUserServiceImpl(SysUserMapper sysUserMapper,PasswordEncoder passwordEncoder, 
         if (userId == null || !StringUtils.hasText(oldPassword) || !StringUtils.hasText(newPassword)) {
             return false;
         }
-        SysUser user = getById(userId);
-        if (user == null) {
-            return false;
+        SysUser patch = new SysUser();
+        patch.setId(userId);
+        patch.setPassword(passwordEncoder.encode(newPassword));
+        boolean ok = updateById(patch);
+        if (ok) {
+            bumpTokenVersion(userId);
         }
-        if (!passwordEncoder.matches(oldPassword, user.getPassword())) {
-            return false;
-        }
-        user.setPassword(passwordEncoder.encode(newPassword));
-        return updateById(user);
+       return ok;
     }
     //删
     @Override
@@ -237,17 +236,14 @@ SysUserServiceImpl(SysUserMapper sysUserMapper,PasswordEncoder passwordEncoder, 
         if (userId == null) {
             return false;
         }
-        SysUser existUser = getById(userId);
-        if (existUser == null) {
-            return false;
-        }
-        if (existUser.getStatus() == null || existUser.getStatus() == 0) {
-            return false;
-        }
         SysUser updateUser = new SysUser();
         updateUser.setId(userId);
         updateUser.setStatus(0);
-        return updateById(updateUser);
+        boolean ok = updateById(updateUser);
+        if (ok) {
+            bumpTokenVersion(userId);
+        }
+        return ok;
     }
 
     @Override
@@ -285,7 +281,11 @@ SysUserServiceImpl(SysUserMapper sysUserMapper,PasswordEncoder passwordEncoder, 
         SysUser patch = new  SysUser();
         patch.setId(userId);
         patch.setPassword(passwordEncoder.encode(newPassword));
-        return updateById(patch);
+        boolean ok = updateById(patch);
+        if (ok){
+            bumpTokenVersion(userId);
+        }
+        return ok;
     }
 
     @Override
@@ -302,4 +302,13 @@ SysUserServiceImpl(SysUserMapper sysUserMapper,PasswordEncoder passwordEncoder, 
     return updateById(patch);
     }
 
+    private void bumpTokenVersion(Long userId){
+    if (userId == null) {
+        return;
+    }
+    update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<SysUser>()
+            .setSql("token_version = token_version + 1")
+            .eq(SysUser::getId, userId));
+        log.info("[Auth] token 版本已自增 userId={}（该用户旧 token 全部失效）", userId);;
+    }
 }

@@ -49,6 +49,7 @@ public class SysUserController {
         claims.put("userId", user.getId());
         claims.put("username", user.getUsername());
         claims.put("role", user.getUserRole());
+        claims.put("ver", user.getTokenVersion() == null ? 0 : user.getTokenVersion());
 
         String token = jwtUtil.generateToken(claims);
 
@@ -190,10 +191,18 @@ public class SysUserController {
         }
     }
 
+
     @GetMapping("/get/{userId}")
     public Result<SysUser> getUserById(@PathVariable Long userId) {
         if (userId == null) {
             return Result.error("用户id不能空");
+        }
+        Long me = currentUser.userIdOrNull();
+        if (me == null) {
+            return Result.error(401,"未登录");
+        }
+        if (!me.equals(userId) && !currentUser.isAdmin()) {
+            return Result.error(403,"无权查看其他用户资料");
         }
         SysUser user = sysUserService.getById(userId);
         if (user == null) {
@@ -201,6 +210,8 @@ public class SysUserController {
         }
         return Result.success(user);
     }
+
+
 
     @PreAuthorize("hasRole('ADMIN')")
     @PutMapping("/resetPassword/{userId}")
