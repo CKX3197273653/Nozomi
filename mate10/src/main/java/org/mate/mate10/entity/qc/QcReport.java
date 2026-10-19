@@ -2,10 +2,12 @@ package org.mate.mate10.entity.qc;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 
 @Data
 @TableName("qc_report")
@@ -28,4 +30,9 @@ public class QcReport {
     // 时间字段
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
+
+    //归档 MP在所有CRUD上自动补deleted = 0
+    @TableLogic
+    private Integer deleted;
+    private LocalTime archiveTime;
 }

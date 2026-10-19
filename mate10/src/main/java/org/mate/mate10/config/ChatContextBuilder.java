@@ -174,6 +174,7 @@ public class ChatContextBuilder {
             int remain = budget - used;
             if (remain <= 0)break;
             if (content.length() > cap) {
+                log.info("[裁剪] 截断一条历史消息: 原长 {} → {}", content.length(), cap);
                 content = "…" + content.substring(content.length() - cap);
             }
             if (content.length() > remain) {

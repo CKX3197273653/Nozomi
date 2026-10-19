@@ -1,5 +1,6 @@
 package org.mate.mate10.service.Impl.qc;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.mate.mate10.common.EvictQcCache;
 import org.mate.mate10.entity.qc.QcDefect;
 import org.mate.mate10.mapper.qc.QcDefectMapper;
@@ -41,6 +42,25 @@ public class QcDefectServiceImpl implements QcDefectService {
     @EvictQcCache
     public boolean deleteDefect(Long id) {
         return qcDefectMapper.deleteById(id) > 0;
+    }
+
+    @Override
+    @EvictQcCache
+    public int deleteByReportId(Long reportId) {
+        if (reportId == null) {return 0;}
+        return qcDefectMapper.delete(new LambdaQueryWrapper<QcDefect>()
+                .eq(QcDefect::getReportId, reportId)
+        );
+    }
+
+    @Override
+    public int countByReportId(Long reportId) {
+        if (reportId == null) {
+            return 0;
+        }
+        Long c = qcDefectMapper.selectCount(new LambdaQueryWrapper<QcDefect>()
+                .eq(QcDefect::getReportId, reportId));
+        return c == null ? 0 : Math.toIntExact(c);
     }
 
     @Override

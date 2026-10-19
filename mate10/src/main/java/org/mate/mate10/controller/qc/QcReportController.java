@@ -148,6 +148,17 @@ public class QcReportController {
             }
         return Result.success();
     }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @DeleteMapping("/{id}/purge")
+    public Result<Void> purgeReport(@PathVariable Long id) {
+        boolean ok = qcReportService.purgeReport(id);
+        if (!ok) {
+            return Result.error("彻底删除失败:报告不存在");
+        }
+        return Result.success();
+    }
+
     //私有方法
     //根据文件名称判断类型
     private static final Map<String, String> FILE_TYPE_MAP;

@@ -60,6 +60,8 @@ public class ChatController {
 
     @PostMapping("/ai/chatRecord")
     public Result<String> chat(@RequestBody ChatRequest request) {
+        log.info("[chatRecord] 收到 chatId={} userId={} mode={} message={}",
+                request.getChatId(), request.getUserId(), request.getMode(), request.getMessage());
         String message = request.getMessage();
         String mode = request.getMode();
         Long chatId = request.getChatId();
@@ -92,6 +94,8 @@ public class ChatController {
     //前端读流
     @PostMapping(value = "/ai/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chatStream(@RequestBody ChatRequest request) {
+        log.info("[chatStream] 收到 chatId={} userId={} mode={} message={}",
+                request.getChatId(), request.getUserId(), request.getMode(), request.getMessage());
         //5分钟  不设置时间,连接会一直保持,一直占用资源
         SseEmitter emitter = new SseEmitter(5 * 60 * 1000L);
         String message = request.getMessage();

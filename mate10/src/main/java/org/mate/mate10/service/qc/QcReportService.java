@@ -20,6 +20,8 @@ public interface QcReportService {
     boolean updateReport(QcReport report);
     //删除报告
     boolean deleteReport(Long id);
+
+    boolean purgeReport(Long id);
     //ID查询
     QcReport getById(Long id);
 

@@ -23,7 +23,7 @@ public class KafkaConfig {
     @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
     private String bootstrapServers;
     //消费者组
-    @Value("${spring.kafka.consumer.group-id:chat-group}")
+    @Value("${spring.kafka.consumer.group-id:mate10-group}")
     private String groupId;
     // 生产者
     @Bean
@@ -50,10 +50,15 @@ public class KafkaConfig {
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest"); //从头读取
-        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, true);
-        props.put(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG,1000);//自动提交间隔
-        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 100);
+        //关掉自动提交 :offset 统一交给容器(AckMode.Batch)提交
+        //开着会和容器提交并存 -> 可能"还没处理完就已经提交了"  -> 崩溃就丢消息
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        //一次只拉5条,单条要跑 OCR + AI(秒级),100条会超过 max.poll.interval.ms -> 提出组 -> rebalance -> 整批重放
+        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 5);
+        //单次最长处理时间放宽到10分钟,(5条 * 最长约1分钟,留余量)
+        props.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, 600_000);
         return new DefaultKafkaConsumerFactory<>(props);
     }
 

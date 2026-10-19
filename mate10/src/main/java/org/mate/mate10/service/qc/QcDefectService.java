@@ -16,6 +16,9 @@ public interface QcDefectService {
     //删
     boolean deleteDefect(Long id);
 
+    int deleteByReportId(Long reportId);
+    int countByReportId(Long reportId);
+
     //查
     List<QcDefect> getByReportId(Long reportId);
 

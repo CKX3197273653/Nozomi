@@ -1,6 +1,7 @@
 package org.mate.mate10.mapper.qc;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -11,18 +12,20 @@ import java.util.Map;
 
 @Mapper
 public interface QcReportMapper extends BaseMapper<QcReport> {
-    @Select("Select * FROM qc_report Where product_name = #{productName} ORDER BY inspect_time DESC")
+    @Select("SELECT * FROM qc_report WHERE product_name = #{productName} AND deleted = 0 ORDER BY inspect_time DESC")
     List<QcReport> selectByProductName(String productName);
 
-    @Select("SELECT * FROM qc_report WHERE status = #{status} ORDER BY create_time DESC")
+    @Select("SELECT * FROM qc_report WHERE status = #{status} AND deleted = 0 ORDER BY create_time DESC")
     List<QcReport> selectByStatus(String status);
+
     //时间趋势统计
     @Select("SELECT DATE(r.inspect_time) as date, " +
             "COUNT(DISTINCT r.id) as totalCount, " +
             "COUNT(d.id) as defectCount " +
             "FROM qc_report r " +
             "LEFT JOIN qc_defect d ON r.id = d.report_id " +
-            "WHERE r.inspect_time >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY) " +
+            "WHERE r.deleted = 0 " +
+            "  AND r.inspect_time >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY) " +
             "GROUP BY DATE(r.inspect_time) " +
             "ORDER BY date ASC")
     List<Map<String, Object>> countByTimeTrend(@Param("days") int days);
@@ -33,9 +36,11 @@ public interface QcReportMapper extends BaseMapper<QcReport> {
             "COUNT(d.id) as defectCount " +
             "FROM qc_report r " +
             "LEFT JOIN qc_defect d ON r.id = d.report_id " +
+            "WHERE r.deleted = 0 " +
             "GROUP BY r.production_line " +
             "ORDER BY totalCount DESC")
     List<Map<String, Object>> countByProductionLine();
+
     //产品批次缺陷统计
     @Select("SELECT r.product_batch, " +
             "MAX(r.production_line) AS production_line, " +
@@ -45,11 +50,18 @@ public interface QcReportMapper extends BaseMapper<QcReport> {
             "  / COUNT(DISTINCT r.id), 1) AS passRate " +
             "FROM qc_report r " +
             "LEFT JOIN qc_defect d ON r.id = d.report_id " +
+            "WHERE r.deleted = 0 " +
             "GROUP BY r.product_batch " +
             "ORDER BY count DESC " +
             "LIMIT #{limit}")
     List<Map<String, Object>> countByProductBatch(@Param("limit") int limit);
 
-    @Select("SELECT * FROM qc_report WHERE report_no = #{reportNo} LIMIT 1")
+    @Select("SELECT * FROM qc_report WHERE report_no = #{reportNo} AND deleted = 0 LIMIT 1")
     QcReport selectByReportNo(@Param("reportNo") String reportNo);
+
+    @Select("SELECT * FROM qc_report WHERE id = #{id} LIMIT 1")
+    QcReport selectRawById(@Param("id") Long id);
+
+    @Delete("DELETE FROM qc_report WHERE id = #{id}")
+    int deleteRawById(@Param("id") Long id);
 }

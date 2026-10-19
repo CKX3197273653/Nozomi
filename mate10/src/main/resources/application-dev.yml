@@ -28,10 +28,10 @@ spring:
       additional-exclude: db/**
 
 milvus:
-  host: 127.0.0.1
-  port: 19530
-  username: root
-  password: root
+  host: ${MILVUS_HOST:localhost}
+  port: ${MILVUS_PORT:19530}
+  username: ${MILVUS_USERNAME:}
+  password: ${MILVUS_PASSWORD:}
 
 tesseract:
   path: ${TESSERACT_PATH:I:\OCR\tesseract-main}
@@ -46,6 +46,12 @@ app:
     detail: true
 
 logging:
+  file:
+    name: logs/mate10.log
+  logback:
+    rollingpolicy:
+      max-file-size: 50MB
+      max-history: 7
   level:
     root: info
     org.mate.mate10: DEBUG

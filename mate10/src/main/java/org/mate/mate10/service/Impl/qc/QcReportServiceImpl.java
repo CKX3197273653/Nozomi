@@ -2,6 +2,7 @@ package org.mate.mate10.service.Impl.qc;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -12,6 +13,8 @@ import org.mate.mate10.config.ChatModelFactory;
 import org.mate.mate10.entity.qc.QcDefect;
 import org.mate.mate10.entity.qc.QcProductionParam;
 import org.mate.mate10.entity.qc.QcReport;
+import org.mate.mate10.mapper.qc.QcDefectMapper;
+import org.mate.mate10.mapper.qc.QcProductionParamMapper;
 import org.mate.mate10.mapper.qc.QcReportMapper;
 import org.mate.mate10.service.FileParseService;
 import org.mate.mate10.service.qc.QcDefectService;
@@ -25,6 +28,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.nio.file.Paths;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -47,6 +52,10 @@ public class QcReportServiceImpl implements QcReportService {
     private ChatModelFactory chatModelFactory;
     @Autowired
     private CacheManager cacheManager;
+    @Autowired
+    private QcDefectMapper qcDefectMapper;
+    @Autowired
+    private QcProductionParamMapper qcProductionParamMapper;
 
     @Override
     @Transactional  // 事务：三个操作要么都成功，要么都失败
@@ -79,8 +88,8 @@ public class QcReportServiceImpl implements QcReportService {
         try {
             //空值检查
             if (fileContent == null ||fileContent.isEmpty()){
-                log.warn("AI分析: 文件内容为空,跳过");
-                return new  java.util.ArrayList<>();
+                throw new IllegalStateException(
+                        "文件内容为空，无法分析（PDF/Word 可能不存在或解析失败）");
             }
             String finalPrompt = (prompt != null && !prompt.isEmpty())
                     ? prompt
@@ -99,8 +108,8 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
             //返回AI解析
             return parseAiResponse(aiResponse, reportId);
         }catch (Exception e) {
-            log.error("AI分析: 缺陷识别失败" +  e.getMessage() + e);
-            return new java.util.ArrayList<>();
+            log.error("AI分析: 缺陷识别失败 {}", e.getMessage(), e);
+            throw new IllegalStateException("AI 缺陷识别失败", e);
         }
     }
     private String getDefaultAnalyzePrompt() {
@@ -112,6 +121,7 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
                 "3. 严重程度（LOW/MEDIUM/HIGH/CRITICAL）\n" +
                 "4. 缺陷描述（简要描述缺陷情况）\n" +
                 "5. 置信度（0-100，表示识别的准确程度）\n\n" +
+                "只输出下面这一个 JSON 对象，不要输出任何解释、标题、Markdown 代码块或前后缀文字 \n" +
                 "【输出格式】\n" +
                 "请严格按以下 JSON 格式输出，不要添加其他文字：\n" +
                 "{\n" +
@@ -167,7 +177,7 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
             log.info("AI分析：解析完成，识别到 {} 个缺陷", defects.size());
 
         } catch (Exception e) {
-            log.error("AI分析:JSON 解析失败" + e.getMessage(),e);
+            throw new IllegalStateException("AI 返回内容无法解析为 JSON：" + e.getMessage(), e);
         }
 
         return defects;
@@ -175,16 +185,26 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
 
     private String cleanJsonResponse(String response) {
         if (response == null) return "{}";
+        String s = response.trim();
 
-        if (response.contains("```json")) {
-            response = response.substring(response.indexOf("```json") + 7);
-            response = response.substring(0, response.indexOf("```"));
-        } else if (response.contains("```")) {
-            response = response.substring(response.indexOf("```") + 3);
-            response = response.substring(0, response.indexOf("```"));
+        if (s.contains("```json")) {
+            s = s.substring(s.indexOf("```json") + 7);
+            int end = s.indexOf("```");
+            if (end > 0) s = s.substring(0, end);
+        } else if (s.contains("```")) {
+            s = s.substring(s.indexOf("```") + 3);
+            int end = s.indexOf("```");
+            if (end > 0) s = s.substring(0, end);
         }
 
-        return response.trim();
+        int start = s.indexOf('{');
+        int end2  = s.lastIndexOf('}');
+        if (start >= 0 && end2 > start) {
+            s = s.substring(start, end2 + 1);
+        }
+
+        log.debug("AI分析:清理后的JSON长度={}", s.length());
+        return s.trim();
     }
 
     private String getTextOrDefault(com.fasterxml.jackson.databind.JsonNode node,
@@ -223,12 +243,54 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
     public boolean updateReport(QcReport report){
         return qcReportMapper.updateById(report)>0;
     }
+
+    //归档为删除报告的默认动作
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public boolean deleteReport(Long id){
-        boolean ok = qcReportMapper.deleteById(id) > 0;
+        if (id == null) return false;
+        boolean ok = qcReportMapper.update(null,
+                new LambdaUpdateWrapper<QcReport>()
+                        .set(QcReport::getDeleted, 1)
+                        .set(QcReport::getArchiveTime, LocalDateTime.now())
+                        .eq(QcReport::getId, id)) > 0;
         evictQcCache();
         return ok;
     }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean purgeReport(Long id){
+        if (id == null) return false;
+        QcReport raw = qcReportMapper.selectRawById(id);
+        if (raw == null) return false;
+        qcDefectMapper.delete(new LambdaQueryWrapper<QcDefect>()
+                .eq(QcDefect::getReportId, id));
+        qcProductionParamMapper.delete(new LambdaQueryWrapper<QcProductionParam>()
+                .eq(QcProductionParam::getReportId, id));
+        //物理删主表
+        boolean ok = qcReportMapper.deleteRawById(id) > 0;
+        deleteAttachmentFile(raw.getFileUrl());
+        evictQcCache();
+        return ok;
+    }
+    private void deleteAttachmentFile(String fileUrl) {
+        if (!StringUtils.hasText(fileUrl)) return;
+        try{
+            java.nio.file.Path base = java.nio.file.Paths.get("uploads").toAbsolutePath().normalize();
+            java.nio.file.Path file = java.nio.file.Paths.get(fileUrl).toAbsolutePath().normalize();
+            if (!file.startsWith(base)) {
+                log.warn("[Purge] 附件不在 uploads/ 下,跳过: {}", file);
+                return;
+            }
+            boolean deleted = java.nio.file.Files.deleteIfExists(file);
+            log.info("[Purge] 删除附件 {} → {}", file, deleted ? "成功" : "文件不存在");
+        }catch (Exception e){
+            log.warn("[Purge] 删除附件失败(不影响数据): {} , {}", fileUrl, e.getMessage());
+        }
+    }
+
+
     private void evictQcCache() {
         // RedisConfig 配了 immediateWrites，clear() 会立即同步执行
         cacheManager.getCache("qcStats").clear();
@@ -312,24 +374,26 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
     /* 告诉spring Kafka监听qc-report-topic主题,有消息自动调用 */
     @org.springframework.kafka.annotation.KafkaListener(topics = "qc-report-topic")
     /*参数是字符串不是Map,这是Kafka原始格式*/
-    @EvictQcCache
     public void consumeAnalyzeTask(String messageJson){
+        Long reportId = null;
         try{
-            //解析JSON字符串为Map
             java.util.Map<String,Object> msg = objectMapper.readValue(messageJson,java.util.Map.class);
-            //从Map中提取参数
-            /* JSON解析数字时,ObjectMapper默认转为Integer或者Long,为了保险我们统一((Number) ...).longValue()*/
-            Long reportId = ((Number) msg.get("reportId")).longValue();
-            String fileUrl = (String)msg.get("fileUrl");
-            String fileType = (String)msg.get("fileType");
-            String prompt = (String)msg.get("prompt");
-            log.info("Kafka消费者接收到消息"+reportId);
+            Object rid = msg.get("reportId");
+            if (rid == null) {
+                throw new IllegalArgumentException("消息缺少 reportId: " + messageJson);
+            }
+            reportId = ((Number) rid).longValue();
 
-            //调用业务方法处理
-            processAnalyzeTask(reportId,fileUrl,fileType,prompt);
-            log.info("Kafka消费者消息处理成功"+ reportId);
+            String fileUrl  = (String) msg.get("fileUrl");
+            String fileType = (String) msg.get("fileType");
+            String prompt   = (String) msg.get("prompt");
+
+            log.info("Kafka消费者接收到消息 reportId={}", reportId);
+            processAnalyzeTask(reportId, fileUrl, fileType, prompt);
+            log.info("Kafka消费者消息处理成功 reportId={}", reportId);
         }catch (Exception e){
-            log.error("Kafka消息处理失败"+e.getMessage(),e);
+            log.error("Kafka消息处理失败,交给重试 reportId={}", reportId, e);
+            throw new RuntimeException("Kafka消息处理失败 reportId=" + reportId, e);
         }
     }
 
@@ -337,30 +401,46 @@ ChatResponse response = chatModelFactory.getChatModel().chat(userMessage);
     @Override
     @EvictQcCache
     public void processAnalyzeTask(Long reportId, String fileUrl, String fileType,String prompt) {
-      try{
-          log.info("业务处理-分析报告"+reportId);
-          //状态更改为 PROCESSING
-          updateStatus(reportId,"PROCESSING");
-          //读取文件内容
-          String fileContent = readFileContent(fileUrl,fileType);
-          log.info("业务处理-提取文件长度"+(fileContent != null ? fileContent.length() : 0));
+        //报告不存在就失败,用了 selectById -> 已归档的报告查不到,正好符合"归档的报告不再重新分析"
+        if (reportId == null || qcReportMapper.selectById(reportId) == null) {
+            throw new IllegalArgumentException("报告不存在: reportId=" + reportId);
+        }
+        try{
+            log.info("业务处理-分析报告{}", reportId);
+            //状态更改为 PROCESSING
+            updateStatus(reportId,"PROCESSING");
+            //读取文件内容
+            String fileContent = readFileContent(fileUrl,fileType);
+            log.info("业务处理-提取文件长度{}", fileContent != null ? fileContent.length() : 0);
 
-          java.util.List<org.mate.mate10.entity.qc.QcDefect> defects = analyzeDefectsByAI(reportId,fileContent,prompt);
+            java.util.List<org.mate.mate10.entity.qc.QcDefect> defects = analyzeDefectsByAI(reportId,fileContent,prompt);
 
+            //幂等关键,先删除报告的旧缺陷,再写这一批,消息重放/重试都不会让缺陷翻倍
+            int removed = qcDefectService.deleteByReportId(reportId);
+            if (removed > 0) {
+                log.info("业务处理-清理旧缺陷 {} 条 reportId={}", removed, reportId);
+            }
           if (defects!=null && !defects.isEmpty()){
               qcDefectService.batchAddDefects(defects);
           }
-          int defectCount = (defects != null) ? defects.size() : 0;
-          String severityLevel = calculateSeverityLevel(defects);
-          updateDefectCount(reportId,defectCount,severityLevel);
-          updateStatus(reportId,"COMPLETED");
+
+          //total_defects 用[库里真实条数],不用"本批的size",因为在重放场景下会和实际行数对不上
+            int defectCount = qcDefectService.countByReportId(reportId);
+            String severityLevel = calculateSeverityLevel(defects);
+            updateDefectCount(reportId,defectCount,severityLevel);
+            updateStatus(reportId,"COMPLETED");
 
           log.info("业务处理-报告分析完毕"+reportId+"缺陷数:"+defectCount);
       }catch (Exception e){
-          updateStatus(reportId,"FAILED");
-          log.error("报告分析失败, reportId={}", reportId, e);
-          throw new RuntimeException("报告分析失败",e);
-      }
+            //兜底一次 FAILED,到那时别让他覆盖原始异常
+            try {
+                updateStatus(reportId,"FAILED");
+            } catch (Exception ignore) {
+                log.warn("更新 FAILED 状态也失败了 reportId={}", reportId);
+            }
+            log.error("报告分析失败, reportId={}", reportId, e);
+            throw new RuntimeException("报告分析失败",e);
+        }
     }
     @Override
     @Cacheable(cacheNames="qcStats", key="'trend:' + (#days <= 0 ? 7 : #days)")
