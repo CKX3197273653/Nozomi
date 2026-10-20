@@ -79,4 +79,11 @@ public class GlobalExceptionHandler {
         // 生产环境-不暴露内部细节
         return Result.error("系统异常，请联系管理员");
     }
+    // 上传文件超过大小限制
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    public Result<?> handleMaxUploadSize(
+            org.springframework.web.multipart.MaxUploadSizeExceededException e) {
+        log.warn("上传文件超过大小限制: {}", e.getMessage());
+        return Result.error(ResultCode.BAD_REQUEST, "上传文件过大，请压缩后重试");
+    }
 }

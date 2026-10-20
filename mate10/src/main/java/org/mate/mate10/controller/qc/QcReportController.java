@@ -33,6 +33,8 @@ public class QcReportController {
     @Autowired
     private org.mate.mate10.common.CurrentUserProvider currentUser;
 
+    private static final long MAX_FILE_SIZE = 20L * 1024 * 1024;
+
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping("/{reportNo}/audit")
     public Result<ReportAuditDTO> audit(@PathVariable String reportNo) {
@@ -103,9 +105,16 @@ public class QcReportController {
             @RequestParam String inspector,
             @RequestParam(value = "prompt",required = false) String prompt){
         try{
+
             //校验
+            //空文件
             if (file.isEmpty()){
                 return Result.error(ResultCode.BAD_REQUEST, "文件不能空");
+            }
+            //大小
+            if (file.getSize() > MAX_FILE_SIZE) {
+                return Result.error(ResultCode.BAD_REQUEST,
+                        "文件超过 " + (MAX_FILE_SIZE / 1024 / 1024) + "MB，请压缩后重试");
             }
             //获取文件名称和判断类型
             String originalFilename = file.getOriginalFilename();
@@ -113,6 +122,11 @@ public class QcReportController {
             if (fileType == null) {
                 return Result.error(ResultCode.BAD_REQUEST, "不支持的文件类型，仅支持 PDF、图片、Word、Excel");
             }
+            if (!magicMatches(file, fileType)) {
+                return Result.error(ResultCode.BAD_REQUEST,
+                        "文件内容与扩展名不符（可能被改过后缀），请上传真实文件");
+            }
+
             //保存到本地
             String fileUrl = saveFile(file);
             //创建报告记录
@@ -213,9 +227,52 @@ public class QcReportController {
                 dir.mkdirs();}
             // 写入文件
             Path path = Paths.get(uploadDir + newFilename);
-            Files.copy(file.getInputStream(), path, StandardCopyOption.REPLACE_EXISTING);
+            try (java.io.InputStream in = file.getInputStream()) {
+                Files.copy(in, path, StandardCopyOption.REPLACE_EXISTING);
+            }
             // 返回文件路径
             return uploadDir + newFilename;
+    }
+    private boolean magicMatches(MultipartFile file, String fileType) {
+        byte[] head;
+        try (java.io.InputStream in = file.getInputStream()) {
+            head = in.readNBytes(8);
+        } catch (IOException e) {
+            log.warn("[Upload] 读取文件头失败: {}", e.getMessage());
+            return false;
+        }
+        if (head.length < 4) {
+            return false;
+        }
+        return switch (fileType) {
+            case "PDF" -> head[0] == 0x25 && head[1] == 0x50 && head[2] == 0x44 && head[3] == 0x46;
+            case "WORD", "EXCEL" -> isZip(head) || isOle(head);
+            case "IMAGE" -> isPng(head) || isJpeg(head) || isGif(head) || isBmp(head);
+            default -> false;
+        };
+    }
+    private boolean isPng(byte[] h) {
+        return (h[0] & 0xFF) == 0x89 && h[1] == 0x50 && h[2] == 0x4E && h[3] == 0x47;
+    }
+    private boolean isJpeg(byte[] h) {
+        return (h[0] & 0xFF) == 0xFF && (h[1] & 0xFF) == 0xD8 && (h[2] & 0xFF) == 0xFF;
+    }
+    private boolean isGif(byte[] h) {
+        return h[0] == 0x47 && h[1] == 0x49 && h[2] == 0x46 && h[3] == 0x38;
+    }
+    private boolean isBmp(byte[] h) {
+        return h[0] == 0x42 && h[1] == 0x4D;
+    }
+    // .docx/.xlsx 或 .doc/.xls
+    private boolean isZip(byte[] h) {
+        return h[0] == 0x50 && h[1] == 0x4B
+                && (h[2] == 0x03 || h[2] == 0x05 || h[2] == 0x07)
+                && (h[3] == 0x04 || h[3] == 0x06 || h[3] == 0x08);
+    }
+    //老版 .doc / .xls 是 OLE 复合文档: D0 CF 11 E0
+    private boolean isOle(byte[] h) {
+        return (h[0] & 0xFF) == 0xD0 && (h[1] & 0xFF) == 0xCF
+                && h[2] == 0x11 && (h[3] & 0xFF) == 0xE0;
     }
 
     private void fillFileExists(QcReport report) {
