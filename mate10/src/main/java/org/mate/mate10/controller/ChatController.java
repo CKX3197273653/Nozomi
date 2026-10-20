@@ -4,6 +4,7 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import org.mate.mate10.common.CurrentUserProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import lombok.extern.slf4j.Slf4j;
 import org.mate.mate10.common.Result;
@@ -38,11 +39,12 @@ public class ChatController {
     @Autowired
     private ChatRecordService recordService;
     @Autowired
+    @Qualifier("chatStreamExecutor")
     private ThreadPoolTaskExecutor streamExecutor;
     @Autowired
     private ChatContextBuilder chatContextBuilder;
     @Autowired
-    private CurrentUserProvider  currentUser;
+    private CurrentUserProvider currentUser;
 
     @Value("${app.error.detail:false}")
     private boolean errorDetail;
@@ -53,7 +55,7 @@ public class ChatController {
         //会话归属一律登陆态,忽略body里的userId
         Long userId = currentUser.userIdOrNull();
         if (userId == null) {
-            return Result.error(401,"未登录");
+            return Result.error(401, "未登录");
         }
         return Result.success(chatService.createChat(userId, chat.getTitle()));
     }
@@ -68,11 +70,11 @@ public class ChatController {
 
         Long userId = currentUser.userIdOrNull();
         if (userId == null) {
-            return Result.error(401,"未登录");
+            return Result.error(401, "未登录");
         }
-         if (chatId != null && !canAccessChat(chatId, userId)) {
-             return Result.error(403,"无权访问会话");
-         }
+        if (chatId != null && !canAccessChat(chatId, userId)) {
+            return Result.error(403, "无权访问会话");
+        }
         // 组装上下文
         List<ChatMessage> messages = chatContextBuilder.build(chatId, message, mode);
 
@@ -108,11 +110,15 @@ public class ChatController {
 
         //流式接口的错误也走SSE约定(发error + done),不返回HTTP 401/403,方法签名也是SseEmitter,而且前端本来就在处理这两个事件,emitter返回前的send会被Spring缓冲,不会丢
         if (userId == null) {
-            finish(emitter, finished,"未登录,请重新登录");
+            finish(emitter, finished, "未登录,请重新登录");
             return emitter;
         }
         if (chatId != null && !canAccessChat(chatId, userId)) {
-            finish(emitter,finished,"无权访问会话");
+            finish(emitter, finished, "无权访问会话");
+            return emitter;
+        }
+        if (!org.springframework.util.StringUtils.hasText(message)) {
+            finish(emitter, finished, "问题不能为空");
             return emitter;
         }
 
@@ -122,63 +128,71 @@ public class ChatController {
             finish(emitter, finished, "响应超时，请重试");
         });
 
-        //放进独立线程执行,方法返回 emitter
-        streamExecutor.execute(() -> {
-            StringBuilder full = new StringBuilder();
-            try {
-                //用户消息,再try内抛异常会变成HTTP 500(不走SSE收尾)
-                if (chatId != null) {
-                    mongoChatMessageService.saveUserMessage(chatId, userId, message);
-                }
-                List<ChatMessage> messages = chatContextBuilder.build(chatId, message, mode);
-                chatModelFactory.getStreamingChatModel().chat(messages,
-                        new StreamingChatResponseHandler() {
+        try {
+            //放进独立线程执行,方法返回 emitter
+            streamExecutor.execute(() -> {
+                StringBuilder full = new StringBuilder();
+                try {
+                    //用户消息,再try内抛异常会变成HTTP 500(不走SSE收尾)
+                    if (chatId != null) {
+                        mongoChatMessageService.saveUserMessage(chatId, userId, message);
+                    }
+                    List<ChatMessage> messages = chatContextBuilder.build(chatId, message, mode);
+                    chatModelFactory.getStreamingChatModel().chat(messages,
+                            new StreamingChatResponseHandler() {
 
-                            @Override
-                            public void onPartialResponse(String token) {
-                                full.append(token);
-                                try {
-                                    emitter.send(SseEmitter.event().data(token));
-                                } catch (Exception e) {
-                                    //catch Exception:除 IOException 外,send 还会抛
-                                    //IllegalStateException(emitter 已完成/已超时)
-                                    log.warn("推送 token 失败(前端可能已断开): {}", e.getMessage());
-                                    finish(emitter, finished, null);
-                                }
-                            }
-
-                            @Override
-                            public void onCompleteResponse(ChatResponse completeResponse) {
-                                String answer = full.toString();
-                                try {
-                                    if (userId != null && chatId != null) {
-                                        mongoChatMessageService.saveAiMessage(chatId, userId, answer);
-                                        recordService.sendChatRecordToKafka(chatId, userId, message, answer);
+                                @Override
+                                public void onPartialResponse(String token) {
+                                    full.append(token);
+                                    try {
+                                        emitter.send(SseEmitter.event().data(token));
+                                    } catch (Exception e) {
+                                        //catch Exception:除 IOException 外,send 还会抛
+                                        //IllegalStateException(emitter 已完成/已超时)
+                                        log.warn("推送 token 失败(前端可能已断开): {}", e.getMessage());
+                                        finish(emitter, finished, null);
                                     }
-                                } catch (Exception e) {
-                                    //保存/Kafka 失败不应该影响用户拿到回答
-                                    log.error("保存回答失败,chatId={}", chatId, e);
-                                } finally {
-                                    finish(emitter, finished, null);
                                 }
-                            }
 
-                            @Override
-                            public void onError(Throwable error) {
-                                log.error("流式生成失败,chatId={}", chatId, error);
-                                //失败路径一样收尾,防止前端一直卡[思考中]
-                                finish(emitter, finished, errorDetail
-                                        ? "模型调用失败：" + error.getMessage()
-                                        : "模型调用失败，请稍后重试");
-                            }
-                        });
-            } catch (Exception e) {
-                log.error("流式端点异常,chatId={}", chatId, e);
-                finish(emitter, finished, errorDetail
-                        ? "服务异常：" + e.getMessage()
-                        : "服务异常，请稍后重试");
-            }
-        });
+                                @Override
+                                public void onCompleteResponse(ChatResponse completeResponse) {
+                                    String answer = full.toString();
+                                    try {
+                                        if (userId != null && chatId != null) {
+                                            mongoChatMessageService.saveAiMessage(chatId, userId, answer);
+                                            recordService.sendChatRecordToKafka(chatId, userId, message, answer);
+                                        }
+                                    } catch (Exception e) {
+                                        //保存/Kafka 失败不应该影响用户拿到回答
+                                        log.error("保存回答失败,chatId={}", chatId, e);
+                                    } finally {
+                                        finish(emitter, finished, null);
+                                    }
+                                }
+
+                                @Override
+                                public void onError(Throwable error) {
+                                    log.error("流式生成失败,chatId={}", chatId, error);
+                                    //失败路径一样收尾,防止前端一直卡[思考中]
+                                    finish(emitter, finished, errorDetail
+                                            ? "模型调用失败：" + error.getMessage()
+                                            : "模型调用失败，请稍后重试");
+                                }
+                            });
+                } catch (Exception e) {
+                    log.error("流式端点异常,chatId={}", chatId, e);
+                    finish(emitter, finished, errorDetail
+                            ? "服务异常：" + e.getMessage()
+                            : "服务异常，请稍后重试");
+                }
+            });
+        } catch (Exception e) {
+            //线程池拒绝或关闭 -> 任务没有跑起来,此时lambds里的try/catch完全不会执行,必须在这里给前端发 error + done,否则界面一直转圈
+            log.error("[SSE] 任务提交失败(线程池拒绝或已关闭),chatId={}", chatId, e);
+            finish(emitter, finished, errorDetail
+                    ? "服务繁忙：" + e.getMessage()
+                    : "服务繁忙，请稍后重试");
+        }
 
         return emitter; //保持连接
     }
@@ -209,6 +223,7 @@ public class ChatController {
         } catch (Exception ignored) {
         }
     }
+
     private boolean canAccessChat(Long chatId, Long me) {
         if (currentUser.isAdmin()) {
             return true;

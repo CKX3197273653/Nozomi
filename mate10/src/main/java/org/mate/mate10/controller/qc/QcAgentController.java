@@ -10,6 +10,7 @@ import org.mate.mate10.service.MongoChatMessageService;
 import org.mate.mate10.service.ReportDataFingerprintService;
 import org.mate.mate10.service.ReportMemoryService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -29,6 +30,7 @@ public class QcAgentController {
     @Autowired
     private AgentFactory agentFactory;
     @Autowired
+    @Qualifier("agentStreamExecutor")
     private ThreadPoolTaskExecutor streamExecutor;
     @Autowired
     private MongoChatMessageService mongoChatMessageService;
