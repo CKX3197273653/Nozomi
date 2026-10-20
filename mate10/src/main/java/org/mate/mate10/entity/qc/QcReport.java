@@ -1,9 +1,6 @@
 package org.mate.mate10.entity.qc;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.annotation.TableLogic;
-import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -34,5 +31,12 @@ public class QcReport {
     //归档 MP在所有CRUD上自动补deleted = 0
     @TableLogic
     private Integer deleted;
-    private LocalTime archiveTime;
+   //归档时间
+    private LocalDateTime archiveTime;
+    //归档操作人
+    private Long archivedBy;
+
+    //不落库
+    @TableField(exist = false)
+    private Boolean fileExists;
 }

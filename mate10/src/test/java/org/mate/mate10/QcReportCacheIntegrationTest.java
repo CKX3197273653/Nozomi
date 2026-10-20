@@ -131,7 +131,7 @@ class QcReportCacheIntegrationTest {
         String cacheKey = "qcDetail::report:" + id;
         assertThat(stringRedisTemplate.hasKey(cacheKey)).isTrue();
 
-        qcReportService.deleteReport(id);
+        qcReportService.deleteReport(id,1L);
         assertThat(stringRedisTemplate.hasKey(cacheKey)).isFalse();
     }
 

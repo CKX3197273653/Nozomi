@@ -20,10 +20,7 @@ import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 
 import java.time.LocalDateTime;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import static com.baomidou.mybatisplus.extension.toolkit.Db.save;
 
@@ -35,6 +32,7 @@ public class ChatRecordServiceImpl implements ChatRecordService {
     private final ChatModel ChatModel;
     private final ObjectMapper objectMapper;
     private final KafkaTemplate<String, String> kafkaTemplate;
+    private final org.mate.mate10.config.ChatContextBuilder chatContextBuilder;
     //消费者
     @KafkaListener(topics = "chat-topic")
     public void consumeChatMessage(String messageJson)  {
@@ -91,14 +89,24 @@ public class ChatRecordServiceImpl implements ChatRecordService {
 public void saveChatRecord(Long chatId,Long userId,String question,String answer){
         //关键字提取
     String keyword = extractKeyword(question, answer);
+    //从提问里提取报告编号,(复用 ChatContextBuilder 的正则,不重复实现),一条提问可能提到多份报告 -> 只记第一个(表里是单列,审计按等值查询)
+    String reportNo = null;
+    java.util.List<String> reportNos = chatContextBuilder.extractReportNo(question);
+    if (!reportNos.isEmpty()) {
+        reportNo = reportNos.get(0);
+    }
     //创建ChatRecord对象
     ChatRecord record = new ChatRecord();
     record.setChatId(chatId);
     record.setUserId(userId);
     record.setKeyword(keyword);
+    record.setReportNo(reportNo);
     record.setCreateTime(LocalDateTime.now());
 
     chatRecordMapper.insert(record);
+    if (reportNo != null) {
+        log.info("对话记录已关联报告,reportNo={} chatId={}", reportNo, chatId);
+    }
 }
     @Override
     public List<ChatRecord> getChatMessages(Long chatId) {

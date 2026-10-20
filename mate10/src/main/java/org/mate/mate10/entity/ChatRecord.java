@@ -17,4 +17,5 @@ public class ChatRecord {
     private Long chatId;
     private String keyword;
     private LocalDateTime createTime;
+    private String reportNo;
 }

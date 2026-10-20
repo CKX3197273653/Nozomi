@@ -247,14 +247,16 @@ public class QcReportServiceImpl implements QcReportService {
     //归档为删除报告的默认动作
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public boolean deleteReport(Long id) {
+    public boolean deleteReport(Long id,Long  operatorId) {
         if (id == null) return false;
         boolean ok = qcReportMapper.update(null,
                 new LambdaUpdateWrapper<QcReport>()
                         .set(QcReport::getDeleted, 1)
                         .set(QcReport::getArchiveTime, LocalDateTime.now())
+                        .set(QcReport::getArchivedBy, operatorId)
                         .eq(QcReport::getId, id)) > 0;
         evictQcCache();
+        log.info("[Archive] 归档报告 id={} 操作人={}", id, operatorId);
         return ok;
     }
 

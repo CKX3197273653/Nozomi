@@ -22,7 +22,7 @@ public class QcAnalysisResultApplier {
     
     @Transactional(rollbackFor = Exception.class)
     public int apply(Long reportId, AiAnalysisResult result) {
-        // ① 缺陷：先删旧，再写新 —— 消息重放不会翻倍
+        //先删旧的再写新的,让消息重放不翻倍
         int removed = qcDefectService.deleteByReportId(reportId);
         if (removed > 0) {
             log.info("[Apply] 清理旧缺陷 {} 条 reportId={}", removed, reportId);

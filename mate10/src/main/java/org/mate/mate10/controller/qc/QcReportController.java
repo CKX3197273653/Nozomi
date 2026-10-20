@@ -1,6 +1,8 @@
 package org.mate.mate10.controller.qc;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import lombok.extern.slf4j.Slf4j;
+import org.mate.mate10.common.ResultCode;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.mate.mate10.common.Result;
 import org.mate.mate10.dto.ReportAuditDTO;
@@ -20,6 +22,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/qc/report")
 public class QcReportController {
@@ -27,12 +30,14 @@ public class QcReportController {
     private QcReportService qcReportService;
     @Autowired
     private ReportAuditService reportAuditService;
+    @Autowired
+    private org.mate.mate10.common.CurrentUserProvider currentUser;
 
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping("/{reportNo}/audit")
     public Result<ReportAuditDTO> audit(@PathVariable String reportNo) {
         if (reportNo == null || reportNo.isBlank()) {
-            return Result.error("reportNo 不能为空");
+            return Result.error(ResultCode.BAD_REQUEST,"reportNo 不能为空");
         }
         return Result.success(reportAuditService.audit(reportNo));
     }
@@ -43,10 +48,10 @@ public class QcReportController {
     public Result<Long> createReport(@RequestBody QcReport report) {
         //校验
         if (report.getReportNo() == null || report.getReportNo().isEmpty()) {
-            return Result.error("编号不能空");
+            return Result.error(ResultCode.BAD_REQUEST, "编号不能空");
         }
         if (report.getProductName() == null || report.getProductName().isEmpty()) {
-            return Result.error("产品名称不能空");
+            return Result.error(ResultCode.BAD_REQUEST, "产品名称不能空");
         }
         //默认值
         if (report.getStatus() == null){
@@ -72,6 +77,7 @@ public class QcReportController {
             @RequestParam(required = false) String status) {
         Page<QcReport> page = qcReportService.pageList(pageNum, pageSize,
                 reportNo, productName, productBatch, productionLine, status);
+        page.getRecords().forEach(this::fillFileExists);
         return Result.success(page);
     }
 
@@ -80,9 +86,10 @@ public class QcReportController {
     public Result<QcReport> getById(@PathVariable Long id) {
         QcReport report = qcReportService.getById(id);
         if (report != null) {
+            fillFileExists(report);
             return Result.success(report);
         }
-        return Result.error("报告不存在");
+        return Result.error(ResultCode.NOT_FOUND, "报告不存在");
     }
 
     //文件上传
@@ -98,13 +105,13 @@ public class QcReportController {
         try{
             //校验
             if (file.isEmpty()){
-                return Result.error("文件不能空");
+                return Result.error(ResultCode.BAD_REQUEST, "文件不能空");
             }
             //获取文件名称和判断类型
             String originalFilename = file.getOriginalFilename();
             String fileType = getFileType(originalFilename);
             if (fileType == null) {
-                return Result.error("不支持的文件类型，仅支持 PDF、图片、Word、Excel");
+                return Result.error(ResultCode.BAD_REQUEST, "不支持的文件类型，仅支持 PDF、图片、Word、Excel");
             }
             //保存到本地
             String fileUrl = saveFile(file);
@@ -124,7 +131,7 @@ public class QcReportController {
             qcReportService.sendAnalyzeTask(reportId, report.getFileUrl(), report.getFileType(),prompt);
             return Result.success(reportId);
         } catch (IOException e) {
-            return Result.error("文件上传失败：" + e.getMessage());
+            return Result.error(ResultCode.ERROR, "文件上传失败：" + e.getMessage());
         }
     }
         //更新报告
@@ -134,7 +141,7 @@ public class QcReportController {
     @RequestParam String status) {
         boolean success = qcReportService.updateStatus(id, status);
         if (!success) {
-        return Result.error("更新状态失败");
+            return Result.error(ResultCode.NOT_FOUND, "更新状态失败，报告可能不存在");
         }
         return Result.success();
     }
@@ -142,9 +149,10 @@ public class QcReportController {
     @PreAuthorize("hasRole('ADMIN')")
     @DeleteMapping("/{id}")
     public Result<Void> deleteReport(@PathVariable Long id) {
-        boolean success = qcReportService.deleteReport(id);
+        Long operatorId = currentUser.userIdOrNull();
+        boolean success = qcReportService.deleteReport(id,operatorId);
             if (!success) {
-                return Result.error("删除失败，报告可能不存在");
+                return Result.error(ResultCode.NOT_FOUND, "删除失败，报告可能不存在");
             }
         return Result.success();
     }
@@ -154,7 +162,7 @@ public class QcReportController {
     public Result<Void> purgeReport(@PathVariable Long id) {
         boolean ok = qcReportService.purgeReport(id);
         if (!ok) {
-            return Result.error("彻底删除失败:报告不存在");
+            return Result.error(ResultCode.NOT_FOUND, "彻底删除失败，报告不存在");
         }
         return Result.success();
     }
@@ -208,6 +216,28 @@ public class QcReportController {
             Files.copy(file.getInputStream(), path, StandardCopyOption.REPLACE_EXISTING);
             // 返回文件路径
             return uploadDir + newFilename;
+    }
+
+    private void fillFileExists(QcReport report) {
+        if (report == null)return;;
+        report.setFileExists(attachmentExists(report.getFileUrl()));
+    }
+    private boolean attachmentExists(String fileUrl) {
+        if (!org.springframework.util.StringUtils.hasText(fileUrl)) {
+            return false;
+        }
+        try{
+            java.nio.file.Path base = java.nio.file.Paths.get("uploads").toAbsolutePath().normalize();
+            java.nio.file.Path file = java.nio.file.Paths.get(fileUrl).toAbsolutePath().normalize();
+            //历史数据是 /files/reportN.pdf(URL路径,不在uploads下) -> 视为缺失
+            if (!file.startsWith(base)) {
+                return false;
+            }
+            return java.nio.file.Files.isRegularFile(file);
+        }catch(Exception e){
+            log.warn("[Attachment] 检查附件失败: {} , {}", fileUrl, e.getMessage());
+            return false;
+        }
     }
 
     @GetMapping("/stats/trend")
