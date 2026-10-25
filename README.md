@@ -1,11 +1,6 @@
 # Mate10 · 智能质检分析平台
 
-![CI](https://github.com/CKX3197273653/Nozomi/actions/workflows/ci.yml/badge.svg)
-![Java](https://img.shields.io/badge/Java-17-blue)
-![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0-brightgreen)
-![Vue](https://img.shields.io/badge/Vue-3-42b883)
-![Docker](https://img.shields.io/badge/Docker-容器化-2496ED)
-![License](https://img.shields.io/github/license/CKX3197273653/Nozomi)
+
 
 > 面向制造业质检场景的全栈平台：**质检数据管理 + AI 对话助手 + RAG 知识库问答**。
 > 支持本地模型与云端模型一键切换，已完整容器化并在华为云验证部署。
@@ -357,3 +352,11 @@ Mate10/
 ├── AGENTS.md                  # 项目约定与踩坑手册
 └── .github/workflows/ci.yml   # CI：后端测试 + 前端构建
 ```
+
+
+![CI](https://github.com/CKX3197273653/Nozomi/actions/workflows/ci.yml/badge.svg)
+![Java](https://img.shields.io/badge/Java-17-blue)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0-brightgreen)
+![Vue](https://img.shields.io/badge/Vue-3-42b883)
+![Docker](https://img.shields.io/badge/Docker-容器化-2496ED)
+![License](https://img.shields.io/github/license/CKX3197273653/Nozomi)
