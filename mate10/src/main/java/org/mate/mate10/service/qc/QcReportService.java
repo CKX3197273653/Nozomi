@@ -18,13 +18,14 @@ public interface QcReportService {
     Long createReport(QcReport report);
     //更新报告
     boolean updateReport(QcReport report);
+    //取消归档 -- 归档的反悔, operatorId 只进日志(表里没有 unarchived_by列)
+    boolean unarchiveReport(Long id, Long operatorId);
     //删除报告
     boolean deleteReport(Long id, Long operatorId);
 
     boolean purgeReport(Long id);
     //ID查询
     QcReport getById(Long id);
-
 
     //分页查询
     Page<QcReport> pageList(int pageNum, int pageSize,

@@ -1,10 +1,7 @@
 package org.mate.mate10.mapper.qc;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import org.apache.ibatis.annotations.Delete;
-import org.apache.ibatis.annotations.Mapper;
-import org.apache.ibatis.annotations.Param;
-import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.*;
 import org.mate.mate10.entity.qc.QcReport;
 
 import java.util.List;
@@ -64,4 +61,7 @@ public interface QcReportMapper extends BaseMapper<QcReport> {
 
     @Delete("DELETE FROM qc_report WHERE id = #{id}")
     int deleteRawById(@Param("id") Long id);
+
+    @Update("UPDATE qc_report SET deleted = 0, archive_time = NULL, archived_by = NULL WHERE id = #{id}")
+    int unarchiveRawById(@Param("id") Long id);
 }

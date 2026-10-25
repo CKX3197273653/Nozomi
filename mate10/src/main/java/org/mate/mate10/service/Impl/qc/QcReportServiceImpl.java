@@ -262,6 +262,17 @@ public class QcReportServiceImpl implements QcReportService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public boolean unarchiveReport(Long id,Long operatorId){
+        if (id == null) return false;
+        //update(null, wrapper.set(deleted,0)); MP 会给Update 自动追加deleted = 0 -> 已归档行匹配不到 -> 静默失效
+        boolean ok =qcReportMapper.unarchiveRawById(id) > 0;
+        evictQcCache();
+        log.info("[Unarchive] 取消归档 id={} 操作人={} -> {}",id,operatorId,ok ? "成功":"无变化(报告不存在或未归档)");
+        return ok;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public boolean purgeReport(Long id) {
         if (id == null) return false;
         QcReport raw = qcReportMapper.selectRawById(id);

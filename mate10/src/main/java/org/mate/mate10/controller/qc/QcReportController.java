@@ -171,6 +171,18 @@ public class QcReportController {
         return Result.success();
     }
 
+    //取消归档
+    @PreAuthorize("hasRole(ADMIN)")
+    @PutMapping("/{id}/unarchive")
+    public Result<Void> unarchiveReport(@PathVariable Long id) {
+        Long operatorId = currentUser.userIdOrNull();
+        boolean success = qcReportService.unarchiveReport(id,operatorId);
+        if (!success){
+            return Result.error(ResultCode.NOT_FOUND,"取消归档失败,报告不存在或未归档");
+        }
+        return  Result.success();
+    }
+
     @PreAuthorize("hasRole('ADMIN')")
     @DeleteMapping("/{id}/purge")
     public Result<Void> purgeReport(@PathVariable Long id) {
