@@ -16,4 +16,7 @@ public interface ReportMemoryRepository extends MongoRepository<ReportMemoryDocu
 
     //审计,报告的完整结论版本链(含被覆盖的历史版本),实践正序
     List<ReportMemoryDocument> findByReportNoOrderByAnalyzedAtAsc(String reportNo);
+
+    long deleteByReportNo(String reportNo);
+
 }

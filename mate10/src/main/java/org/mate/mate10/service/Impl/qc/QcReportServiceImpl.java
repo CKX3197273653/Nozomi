@@ -8,6 +8,7 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.mate.mate10.common.AiResultParser;
 import org.mate.mate10.common.EvictQcCache;
 import org.mate.mate10.common.QcSeverityUtil;
 import org.mate.mate10.config.ChatModelFactory;
@@ -18,6 +19,7 @@ import org.mate.mate10.entity.qc.QcReport;
 import org.mate.mate10.mapper.qc.QcDefectMapper;
 import org.mate.mate10.mapper.qc.QcProductionParamMapper;
 import org.mate.mate10.mapper.qc.QcReportMapper;
+import org.mate.mate10.repository.ReportMemoryRepository;
 import org.mate.mate10.service.FileParseService;
 import org.mate.mate10.service.qc.QcDefectService;
 import org.mate.mate10.service.qc.QcProductionParamService;
@@ -59,9 +61,12 @@ public class QcReportServiceImpl implements QcReportService {
     @Autowired
     private QcProductionParamMapper qcProductionParamMapper;
     @Autowired
-    private org.mate.mate10.common.AiResultParser aiResultParser;
+    private AiResultParser aiResultParser;
     @Autowired
-    private org.mate.mate10.service.Impl.qc.QcAnalysisResultApplier analysisResultApplier;
+    private QcAnalysisResultApplier analysisResultApplier;
+    @Autowired
+    private ReportMemoryRepository repository;
+
 
     @Override
     @Transactional  // 事务：三个操作要么都成功，要么都失败
@@ -283,7 +288,10 @@ public class QcReportServiceImpl implements QcReportService {
                 .eq(QcProductionParam::getReportId, id));
         //物理删主表
         boolean ok = qcReportMapper.deleteRawById(id) > 0;
-        deleteAttachmentFile(raw.getFileUrl());
+        if (ok){
+            deleteAttachmentFile(raw.getFileUrl());
+            purgeMemory(raw.getReportNo());
+        }
         evictQcCache();
         return ok;
     }
@@ -301,6 +309,18 @@ public class QcReportServiceImpl implements QcReportService {
             log.info("[Purge] 删除附件 {} → {}", file, deleted ? "成功" : "文件不存在");
         } catch (Exception e) {
             log.warn("[Purge] 删除附件失败(不影响数据): {} , {}", fileUrl, e.getMessage());
+        }
+    }
+    //请理结论档案(report_memory)
+    //report_no是业务编号,可能被重复使用,不清会在ChatContextBUilder读到上一个旧结论
+    //chat_message是用户会话资产,report_no删除会破坏别人会话的完整性
+    private void purgeMemory(String reportNo) {
+        if (!StringUtils.hasText(reportNo)) return;
+        try{
+            long deleted = repository.deleteByReportNo(reportNo);
+            log.info("[Purge] 清理结论档案 reportNo={} 共 {} 条", reportNo,deleted);
+        }catch (Exception e){
+            log.warn("[Purge] 清理结论档案失败 reportNo={} , {}", reportNo, e.getMessage());
         }
     }
 
