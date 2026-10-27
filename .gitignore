@@ -39,6 +39,8 @@ mate10/data/
 # Opencode
 .opencode/
 opencode.json
+# deepseek
+.dsh-bundles/
 
 # Archives
 *.zip
@@ -62,3 +64,4 @@ Thumbs.db
 # IDE 索引缓存
 mate10/.jlsp/
 mate10/.arts/
+

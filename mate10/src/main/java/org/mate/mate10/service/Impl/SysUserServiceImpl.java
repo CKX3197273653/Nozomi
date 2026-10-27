@@ -8,7 +8,7 @@ import org.mate.mate10.entity.SysUser;
 import org.mate.mate10.mapper.SysUserMapper;
 import org.mate.mate10.service.SysUserService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.mate.mate10.common.UserCache;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -23,11 +23,12 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser>
     private final SysUserMapper sysUserMapper;
     private final PasswordEncoder passwordEncoder;
     private final SysEmployeeMapper sysEmployeeMapper;
-@Autowired
-SysUserServiceImpl(SysUserMapper sysUserMapper,PasswordEncoder passwordEncoder,  SysEmployeeMapper sysEmployeeMapper){
+    private final UserCache userCache;@Autowired
+SysUserServiceImpl(SysUserMapper sysUserMapper,PasswordEncoder passwordEncoder,  SysEmployeeMapper sysEmployeeMapper, org.mate.mate10.common.UserCache userCache){
     this.sysUserMapper = sysUserMapper;
     this.passwordEncoder = passwordEncoder;
     this.sysEmployeeMapper = sysEmployeeMapper;
+    this.userCache = userCache;
 }
     // 登录
     @Override
@@ -261,7 +262,11 @@ SysUserServiceImpl(SysUserMapper sysUserMapper,PasswordEncoder passwordEncoder, 
         SysUser patch = new SysUser();
         patch.setId(userId);
         patch.setStatus(1);
-        return updateById(patch);
+       boolean ok = updateById(patch);
+       if (ok) {
+           userCache.evict(userId);
+       }
+       return ok;
     }
 
     // 删
@@ -299,7 +304,12 @@ SysUserServiceImpl(SysUserMapper sysUserMapper,PasswordEncoder passwordEncoder, 
     SysUser patch = new  SysUser();
     patch.setId(userId);
     patch.setUserRole(role);
-    return updateById(patch);
+    boolean ok = updateById(patch);
+    if (ok) {
+        userCache.evict(userId);
+        log.info("角色已变更, userId={}, role={} (缓存失效, 权限立即生效)", userId, role);
+    }
+    return ok;
     }
 
     private void bumpTokenVersion(Long userId){
@@ -309,6 +319,8 @@ SysUserServiceImpl(SysUserMapper sysUserMapper,PasswordEncoder passwordEncoder, 
     update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<SysUser>()
             .setSql("token_version = token_version + 1")
             .eq(SysUser::getId, userId));
-        log.info("[Auth] token 版本已自增 userId={}（该用户旧 token 全部失效）", userId);;
+    //不清除缓存,filter还会拿旧的 tokenVersion 对比 -> 版本机制要等30S才生效
+        userCache.evict(userId);
+        log.info("[Auth] token 版本已自增 userId={}（该用户旧 token 全部失效）", userId);
     }
 }

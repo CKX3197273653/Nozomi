@@ -6,6 +6,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.mate.mate10.common.UserCache;
 import org.mate.mate10.entity.SysUser;
 import org.mate.mate10.mapper.SysUserMapper;
 import org.mate.mate10.util.JwtUtil;
@@ -19,33 +20,27 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
-    //本地缓存30S
-    private static final long USER_CACHE_TTL_MS = 30_000L;
+//    //本地缓存30S
+//    private static final long USER_CACHE_TTL_MS = 30_000L;
     private final JwtUtil jwtUtil;
     private final SysUserMapper sysUserMapper;
-    //过期时间戳
-    private final Map<Long, Object[]> userCache = new ConcurrentHashMap<>();
+//    //过期时间戳
+//    private final Map<Long, Object[]> userCache = new ConcurrentHashMap<>();
+    private final UserCache userCache;
 
-    public JwtAuthenticationFilter(JwtUtil jwtUtil, SysUserMapper sysUserMapper) {
+    public JwtAuthenticationFilter(JwtUtil jwtUtil, SysUserMapper sysUserMapper, org.mate.mate10.common.UserCache userCache) {
+        this.userCache = userCache;
         this.jwtUtil = jwtUtil;
         this.sysUserMapper = sysUserMapper;
     }
 
     private SysUser loadUserById(Long userId) {
-        long now = System.currentTimeMillis();
-        Object[] cache = userCache.get(userId);
-        if (cache != null && (Long) cache[1] > now) {
-            return (SysUser) cache[0];
-        }
-        SysUser user = sysUserMapper.selectById(userId);
-        userCache.put(userId, new Object[]{user, now + USER_CACHE_TTL_MS});
-        return user;
+
+        return userCache.getOrLoad(userId, () -> sysUserMapper.selectById(userId));
     }
     private SysUser loadUserByUsername(String username) {
         return sysUserMapper.selectByUsernameOrEmail(username);
