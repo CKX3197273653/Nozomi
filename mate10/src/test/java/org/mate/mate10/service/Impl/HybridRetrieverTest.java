@@ -101,4 +101,46 @@ class HybridRetrieverTest {
         verify(luceneIndexer, never()).search(anyString(), anyInt());
         verify(reranker).rerank(eq("问题"), eq(List.of("A", "B")), eq(10));
     }
+
+    @Test
+    @DisplayName("reranker 抛异常：回退 RRF，异常不外抛（R02 兜底）")
+    void retrieve_rerankThrows_fallsBackToRrf() {
+        mockVectorHits(List.of("A", "B"));
+        when(luceneIndexer.search(anyString(), anyInt())).thenReturn(List.of("B", "C"));
+        when(reranker.rerank(anyString(), anyList(), anyInt()))
+                .thenThrow(new IllegalStateException("onnx 原生库崩了"));
+
+        // 关键断言：不抛异常，返回 RRF 融合结果
+        List<String> result = retriever.retrieve("问题");
+
+        verify(reranker).rerank(anyString(), anyList(), anyInt());
+        assertThat(result).containsExactly("B", "A", "C");
+    }
+
+    @Test
+    @DisplayName("reranker 返回空列表：视为失败，同样回退 RRF（静默失效也要兜）")
+    void retrieve_rerankReturnsEmpty_fallsBackToRrf() {
+        mockVectorHits(List.of("A", "B"));
+        when(luceneIndexer.search(anyString(), anyInt())).thenReturn(List.of("B", "C"));
+        when(reranker.rerank(anyString(), anyList(), anyInt())).thenReturn(List.of());
+
+        List<String> result = retriever.retrieve("问题");
+
+        verify(reranker).rerank(anyString(), anyList(), anyInt());
+        assertThat(result).containsExactly("B", "A", "C");
+    }
+
+    @Test
+    @DisplayName("混合检索关 + reranker 抛异常：回退截断后的向量结果")
+    void retrieve_hybridDisabled_rerankThrows_fallsBackToVector() {
+        ragProperties.setHybridEnabled(false);
+        mockVectorHits(List.of("A", "B"));
+        when(reranker.rerank(anyString(), anyList(), anyInt()))
+                .thenThrow(new RuntimeException("boom"));
+
+        List<String> result = retriever.retrieve("问题");
+
+        verify(luceneIndexer, never()).search(anyString(), anyInt());
+        assertThat(result).containsExactly("A", "B");
+    }
 }

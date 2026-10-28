@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
+import java.util.function.Supplier;
 
 @Slf4j
 @Component
@@ -50,18 +51,15 @@ public class HybridRetriever {
 
         //混合检索关闭 → 直接返回向量结果
         if (!ragProperties.isHybridEnabled()) {
-            return rerankOn ? reranker.rerank(question, vectorHits, topK) : vectorHits;
+            return rerankOn ? safeRerank(question, vectorHits, topK, () -> limit(vectorHits, topK)) : vectorHits;
         }
-
         //关键词检索
         List<String> keywordHits = luceneIndexer.search(question, recallK);
-
         //合并去重
         List<String> candidates = dedup(vectorHits, keywordHits);
-
         //重排
         if (rerankOn) {
-            List<String> ranked = reranker.rerank(question, candidates, topK);
+            List<String> ranked = safeRerank(question, candidates, topK, () -> rrfFuse(vectorHits, keywordHits));
             log.info("[Hybrid] 召回 {} 条（向量 {} + 关键词 {}）→ 去重 {} 条 → 重排取 {} 条",
                     vectorHits.size() + keywordHits.size(), vectorHits.size(),
                     keywordHits.size(), candidates.size(), ranked.size());
@@ -71,6 +69,33 @@ public class HybridRetriever {
         //RRF 融合
         return rrfFuse(vectorHits, keywordHits);
 
+    }
+
+    /*
+    * 精排兜底包装
+    * reranker整条链路里唯一可能在运行期间整段抛出异常的环节
+    * */
+    private List<String> safeRerank(String question, List<String> candidates, int topK,
+                                    Supplier<List<String>> fallback) {
+        try {
+            List<String> ranked = reranker.rerank(question, candidates, topK);
+            if (ranked == null || ranked.isEmpty()) {
+                log.warn("[Hybrid] 重排返回空（候选 {} 条），回退", candidates.size());
+                return fallback.get();
+            }
+            return ranked;
+        } catch (Exception e) {
+            log.warn("[Hybrid] 重排异常，回退（候选 {} 条）：{}", candidates.size(), e.getMessage());
+            return fallback.get();
+        }
+    }
+
+    //截断到 topK（混合检索关闭且精排失败时的回退物）
+    private List<String> limit(List<String> list, int topK) {
+        if (list.size() <= topK) {
+            return list;
+        }
+        return new ArrayList<>(list.subList(0, topK));
     }
 
     private List<String> vectorSearch(String question, int topK) {
