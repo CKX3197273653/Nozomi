@@ -2,14 +2,18 @@ package org.mate.mate10.common;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -40,9 +44,16 @@ public class GlobalExceptionHandler {
         log.warn("缺少必填参数: {}", e.getParameterName());
         return Result.error(400,"缺少必填参数: " + e.getParameterName());
     }
-    @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
+    //缺少上传的文件 / 表单部分
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    public Result<?> handleMissingPart(
+            MissingServletRequestPartException e) {
+        log.warn("缺少上传内容: {}", e.getRequestPartName());
+        return Result.error(ResultCode.BAD_REQUEST, "缺少上传内容: " + e.getRequestPartName());
+    }
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public Result<?> handleTypeMismatch(
-            org.springframework.web.method.annotation.MethodArgumentTypeMismatchException e) {
+            MethodArgumentTypeMismatchException e) {
         log.warn("参数类型错误: {}={}", e.getName(), e.getValue());
         return Result.error(400, "参数类型错误: " + e.getName());
     }
@@ -64,6 +75,30 @@ public class GlobalExceptionHandler {
     public Result<?> handleAccessDenied(AccessDeniedException e) {
         log.warn("权限不足，访问被拒绝");
         return Result.error(403, "没有权限");
+    }
+
+    //唯一约束,键取自MySQL 报错里的 for key
+    private static final Map<String, String> UNIQUE_HINTS = Map.of(
+            "qc_report.uk_report_no",  "报告编号已存在",
+            "sys_user.uk_username",    "用户名已存在",
+            "sys_user.uk_email",       "邮箱已存在",
+            "sys_user.uk_user_emp_no", "该工号已被其他账号绑定",
+            "sys_employee.uk_emp_no",  "该工号已在名册中"
+    );
+
+    @ExceptionHandler(DuplicateKeyException.class)
+    public Result<?> handleDuplicateKey(DuplicateKeyException e) {
+        String cause = String.valueOf(e.getMostSpecificCause().getMessage());
+        //Duplicate entry 'x' for key 'qc_report.uk_report_no' -> 取出约束名
+        String hint = UNIQUE_HINTS.entrySet().stream()
+                .filter(en -> cause.contains(en.getKey()))
+                .map(Map.Entry::getValue)
+                .findFirst()
+                .orElse("数据已存在");
+
+        log.warn("[Conflict] {} | {}", hint, cause);
+        return Result.error(ResultCode.CONFLICT,
+                errorDetail ? hint + "（" + cause + "）" : hint);
     }
 
     //未预期报错
