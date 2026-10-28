@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.mate.mate10.agent.AgentFactory;
 import org.mate.mate10.agent.QcAnalysisAgent;
 import org.mate.mate10.common.Result;
+import org.mate.mate10.common.ResultCode;
 import org.mate.mate10.config.ChatContextBuilder;
 import org.mate.mate10.document.ReportMemoryDocument;
 import org.mate.mate10.service.MongoChatMessageService;
@@ -46,7 +47,7 @@ public class QcAgentController {
     public Result<String> analyze(@RequestBody Map<String, String> body) {
         String question = (body == null) ? "" : body.getOrDefault("question", "");
         if (question.isBlank()) {
-            return Result.error("question 不能为空");
+            return Result.error(ResultCode.BAD_REQUEST, "question 不能为空");
         }
         Long chatId = (body == null) ? null : parseLong(body.get("chatId"));
         Long userId = (body == null) ? null : parseLong(body.get("userId"));
@@ -79,7 +80,7 @@ public class QcAgentController {
             return Result.success(answer);
         } catch (Exception e) {
             log.error("Agent 分析失败", e);
-            return Result.error("Agent 分析失败：" + e.getMessage());
+            return Result.error(ResultCode.ERROR, "Agent 分析失败：" + e.getMessage());
         }
     }
 

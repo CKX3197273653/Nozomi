@@ -1,6 +1,7 @@
 package org.mate.mate10.controller.qc;
 
 import org.mate.mate10.common.Result;
+import org.mate.mate10.common.ResultCode;
 import org.mate.mate10.entity.qc.QcDefect;
 import org.mate.mate10.service.qc.QcDefectService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,10 +20,10 @@ public class QcDefectController {
     @PostMapping("/create")
     public Result<Long> createDefect(@RequestBody QcDefect defect){
         if (defect.getReportId()==null){
-            return Result.error("报告Id不能为空");
+            return Result.error(ResultCode.BAD_REQUEST, "报告Id不能为空");
         }
         if (defect.getDefectType()==null || defect.getDefectType().isEmpty()){
-            return Result.error("缺陷类型不能为空");
+            return Result.error(ResultCode.BAD_REQUEST, "缺陷类型不能为空");
         }
         Long defectId = qcDefectService.addDefect(defect);
         return Result.success(defectId);
@@ -30,11 +31,11 @@ public class QcDefectController {
     @PutMapping("/update")
     public Result<Long> updateDefect(@RequestBody QcDefect defect){
         if (defect.getId()==null){
-            return Result.error("参数id不能为空");
+            return Result.error(ResultCode.BAD_REQUEST, "参数id不能为空");
         }
         boolean success = qcDefectService.updateDefect(defect);
         if (!success){
-            return Result.error("更新失败");
+            return Result.error(ResultCode.NOT_FOUND, "更新失败");
         }
         return Result.success(defect.getId());
     }
@@ -42,7 +43,7 @@ public class QcDefectController {
     public Result<Void> deleteDefect(@PathVariable() Long id){
         boolean success = qcDefectService.deleteDefect(id);
         if (!success){
-            return Result.error("删除失败");
+            return Result.error(ResultCode.NOT_FOUND, "删除失败");
         }
         return Result.success();
     }
@@ -69,7 +70,7 @@ public class QcDefectController {
     public Result<Void> confirmDefect(@PathVariable() Long id){
         boolean success = qcDefectService.confirmDefect(id);
         if (!success){
-            return  Result.error("确认失败");
+            return  Result.error(ResultCode.NOT_FOUND, "确认失败");
         }
         return Result.success();
     }
@@ -86,7 +87,7 @@ public class QcDefectController {
             @RequestParam(required = false) String productionLine){
         if ((productBatch == null || productBatch.trim().isEmpty())
                 && (productionLine == null || productionLine.trim().isEmpty())) {
-            return Result.error("请输入批次号或生产线");
+            return Result.error(ResultCode.BAD_REQUEST, "请输入批次号或生产线");
         }
         return Result.success(qcDefectService.getByBatchAndLine(
                 productBatch == null ? null : productBatch.trim(),

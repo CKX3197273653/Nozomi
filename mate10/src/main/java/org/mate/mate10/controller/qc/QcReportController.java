@@ -331,7 +331,7 @@ public class QcReportController {
     public Result<Map<String, Object>> analyzeRootCause(@PathVariable Long id) {
         Map<String, Object> result = qcReportService.analyzeRootCause(id);
         if (result.containsKey("error")) {
-            return Result.error((String) result.get("error"));
+            return Result.error(ResultCode.ERROR, (String) result.get("error"));
         }
         return Result.success(result);
     }

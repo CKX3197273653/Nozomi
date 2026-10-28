@@ -4,6 +4,7 @@ import org.mate.mate10.dto.eval.EvalReport;
 import org.mate.mate10.service.RagEvalService;
 import org.springframework.core.io.Resource;
 import org.mate.mate10.common.Result;
+import org.mate.mate10.common.ResultCode;
 import org.mate.mate10.service.RagService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
@@ -107,7 +108,7 @@ public class RagController {
         try{
             return Result.success(ragEvalService.run());
         }catch(Exception e){
-            return Result.error("评测失败: " + e.getMessage());
+            return Result.error(ResultCode.ERROR, "评测失败: " + e.getMessage());
 
         }
     }

@@ -74,10 +74,10 @@ public class GlobalExceptionHandler {
 
         if (errorDetail) {
             // 开发环境-把异常类型和消息返回，方便定位
-            return Result.error(e.getClass().getSimpleName() + ": " + e.getMessage());
+            return Result.error(ResultCode.ERROR, e.getClass().getSimpleName() + ": " + e.getMessage());
         }
         // 生产环境-不暴露内部细节
-        return Result.error("系统异常，请联系管理员");
+        return Result.error(ResultCode.ERROR, "系统异常，请联系管理员");
     }
     // 上传文件超过大小限制
     @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)

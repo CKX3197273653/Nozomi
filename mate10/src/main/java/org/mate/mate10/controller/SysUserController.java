@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.mate.mate10.common.CurrentUserProvider;
 import org.mate.mate10.common.PasswordPolicy;
 import org.mate.mate10.common.Result;
+import org.mate.mate10.common.ResultCode;
 import org.mate.mate10.entity.SysUser;
 import org.mate.mate10.service.SysUserService;
 import org.mate.mate10.util.JwtUtil;
@@ -38,11 +39,11 @@ public class SysUserController {
             @RequestParam String password
     ) {
         if (!StringUtils.hasText(username) || !StringUtils.hasText(password)) {
-            return Result.error("用户名/邮箱和密码不能空");
+            return Result.error(ResultCode.BAD_REQUEST, "用户名/邮箱和密码不能空");
         }
         SysUser user = sysUserService.login(username, password);
         if (user == null) {
-            return Result.error("用户名/邮箱,密码错误或用户被禁用");
+            return Result.error(ResultCode.UNAUTHORIZED, "用户名/邮箱,密码错误或用户被禁用");
         }
 
         Map<String, Object> claims = new HashMap<>();
@@ -80,7 +81,7 @@ public class SysUserController {
         if (success) {
             return Result.success();
         } else {
-            return Result.error("新增失败,用户名不能空,不能重复");
+            return Result.error(ResultCode.BAD_REQUEST, "新增失败,用户名不能空,不能重复");
         }
     }
 
@@ -91,7 +92,7 @@ public class SysUserController {
         if (success) {
             return Result.success();
         } else {
-            return Result.error("更新失败:用户名重复或者是空的");
+            return Result.error(ResultCode.BAD_REQUEST, "更新失败:用户名重复或者是空的");
         }
     }
 
@@ -115,11 +116,11 @@ public class SysUserController {
             return Result.error(403, "只可以修改自己的用户名");
         }
         if (!StringUtils.hasText(username)) {
-            return Result.error("用户名不能为空");
+            return Result.error(ResultCode.BAD_REQUEST, "用户名不能为空");
         }
 
         boolean success = sysUserService.updateUsername(userId, username);
-        return success ? Result.success() : Result.error("用户名已经存在或修改失败");
+        return success ? Result.success() : Result.error(ResultCode.CONFLICT, "用户名已经存在或修改失败");
     }
 
 
@@ -138,13 +139,13 @@ public class SysUserController {
         }
         String pwdErr = PasswordPolicy.validate(newPassword);
         if (pwdErr != null) {
-            return Result.error(pwdErr);
+            return Result.error(ResultCode.BAD_REQUEST, pwdErr);
         }
         boolean success = sysUserService.updatePassword(userId, oldPassword, newPassword);
         if (success) {
             return Result.success();
         } else {
-            return Result.error("修改失败:用户不存在,旧密码错了,新旧密码不能是空的");
+            return Result.error(ResultCode.BAD_REQUEST, "修改失败:用户不存在,旧密码错了,新旧密码不能是空的");
         }
 
     }
@@ -154,14 +155,14 @@ public class SysUserController {
     public Result<?> disableUser(@PathVariable Long userId) {
         Long me = currentUser.userIdOrNull();
         if (me != null && me.equals(userId)) {
-            return Result.error("不能禁用自己");
+            return Result.error(ResultCode.FORBIDDEN, "不能禁用自己");
         }
         boolean success = sysUserService.disableUser(userId);
         if (success) {
             log.info("[Admin] {} 禁用了 userId={}", me, userId);
             return Result.success("已禁用（30 秒内生效，可用启用接口恢复）");
         }
-        return Result.error("禁用失败：用户不存在，或已是禁用状态");
+        return Result.error(ResultCode.CONFLICT, "禁用失败：用户不存在，或已是禁用状态");
     }
 
     @PreAuthorize("hasRole('ADMIN')")
@@ -169,7 +170,7 @@ public class SysUserController {
     public Result<?> enableUser(@PathVariable Long userId) {
         boolean success = sysUserService.enableUser(userId);
         if (!success) {
-            return Result.error("启用失败:用户不存在或已是正常状态");
+            return Result.error(ResultCode.CONFLICT, "启用失败:用户不存在或已是正常状态");
         }
         log.info("[Admin] {} 启用了 userId={}", currentUser.userIdOrNull(), userId);
         return Result.success("已启用（30 秒内生效）");
@@ -180,14 +181,14 @@ public class SysUserController {
     public Result<?> deleteUser(@PathVariable Long userId) {
         Long me = currentUser.userIdOrNull();
         if (me != null && me.equals(userId)) {
-            return Result.error("不能删除自己");
+            return Result.error(ResultCode.FORBIDDEN, "不能删除自己");
         }
         boolean success = sysUserService.deleteUser(userId);
         if (success) {
             log.info("[Admin] {} 删除了 userId={}", me, userId);
             return Result.success();
         } else {
-            return Result.error("删除失败：用户不存在，或已是禁用状态");
+            return Result.error(ResultCode.CONFLICT, "删除失败：用户不存在，或已是禁用状态");
         }
     }
 
@@ -195,7 +196,7 @@ public class SysUserController {
     @GetMapping("/get/{userId}")
     public Result<SysUser> getUserById(@PathVariable Long userId) {
         if (userId == null) {
-            return Result.error("用户id不能空");
+            return Result.error(ResultCode.BAD_REQUEST, "用户id不能空");
         }
         Long me = currentUser.userIdOrNull();
         if (me == null) {
@@ -206,7 +207,7 @@ public class SysUserController {
         }
         SysUser user = sysUserService.getById(userId);
         if (user == null) {
-            return Result.error("用户不存在");
+            return Result.error(ResultCode.NOT_FOUND, "用户不存在");
         }
         return Result.success(user);
     }
@@ -219,11 +220,11 @@ public class SysUserController {
                                    @RequestParam String newPassword) {
         String pwdErr = PasswordPolicy.validate(newPassword);
         if (pwdErr != null) {
-            return Result.error(pwdErr);
+            return Result.error(ResultCode.BAD_REQUEST, pwdErr);
         }
         boolean success = sysUserService.resetPassword(userId,newPassword);
         if (!success) {
-            return Result.error("重置失败");
+            return Result.error(ResultCode.NOT_FOUND, "重置失败");
         }
         log.info("[Admin] {} 重置了 userId={}的密码", currentUser.userIdOrNull(),userId);
         return Result.success("密码已重置");
@@ -235,14 +236,14 @@ public class SysUserController {
                                 @RequestParam Integer role) {
         Long me = currentUser.userIdOrNull();
         if (me != null && me.equals(userId)) {
-            return Result.error("不能修改自己的角色");
+            return Result.error(ResultCode.FORBIDDEN, "不能修改自己的角色");
         }
         if (role == null || (role != 1 && role != 2)) {
-            return Result.error("角色只能是 1(管理员) 或 2(普通用户)");
+            return Result.error(ResultCode.BAD_REQUEST, "角色只能是 1(管理员) 或 2(普通用户)");
         }
         boolean success = sysUserService.updateRole(userId, role);
         if (!success) {
-            return Result.error("修改失败:用户不存在");
+            return Result.error(ResultCode.NOT_FOUND, "修改失败:用户不存在");
         }
         log.info("[Admin] {} 把 userId={} 的 role 改为 {}", me, userId, role);
         return Result.success("角色已更新");

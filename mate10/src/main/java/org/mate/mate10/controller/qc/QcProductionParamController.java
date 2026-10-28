@@ -1,6 +1,7 @@
 package org.mate.mate10.controller.qc;
 
 import org.mate.mate10.common.Result;
+import org.mate.mate10.common.ResultCode;
 import org.mate.mate10.entity.qc.QcProductionParam;
 import org.mate.mate10.service.qc.QcProductionParamService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,7 +17,7 @@ public class QcProductionParamController {
     @PostMapping("/create")
     public Result<Long> createParam(@RequestBody QcProductionParam param){
         if (param.getReportId()==null){
-            return Result.error("报告id不能空");
+            return Result.error(ResultCode.BAD_REQUEST, "报告id不能空");
         }
         Long paramId = qcProductionParamService.addParam(param);
         return Result.success(paramId);
@@ -25,11 +26,11 @@ public class QcProductionParamController {
     @PutMapping("/update")
     public Result<Void> updateParam(@RequestBody QcProductionParam param){
         if (param.getId()==null){
-            return Result.error("报告id不能空");
+            return Result.error(ResultCode.BAD_REQUEST, "参数id不能空");
         }
         boolean success = qcProductionParamService.updateParam(param);
         if (!success){
-            return Result.error("更新失败");
+            return Result.error(ResultCode.NOT_FOUND, "更新失败");
         }
         return Result.success();
     }
@@ -38,7 +39,7 @@ public class QcProductionParamController {
     public Result<QcProductionParam> getByReportId(@PathVariable Long reportId) {
         QcProductionParam param = qcProductionParamService.getByReportId(reportId);
         if (param == null) {
-            return Result.error("未找到生产参数");
+            return Result.error(ResultCode.NOT_FOUND, "未找到生产参数");
         }
         return Result.success(param);
     }
