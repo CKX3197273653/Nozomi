@@ -10,6 +10,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -51,6 +52,14 @@ public class GlobalExceptionHandler {
         log.warn("缺少上传内容: {}", e.getRequestPartName());
         return Result.error(ResultCode.BAD_REQUEST, "缺少上传内容: " + e.getRequestPartName());
     }
+    //请求不是 multipart
+    @ExceptionHandler(MultipartException.class)
+    public Result<?> handleMultipart(MultipartException e) {
+        log.warn("请求不是 multipart: {}", e.getMessage());
+        return Result.error(ResultCode.BAD_REQUEST,
+                "该接口需要 multipart/form-data 上传文件，请检查 Body 类型");
+    }
+
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public Result<?> handleTypeMismatch(
             MethodArgumentTypeMismatchException e) {
