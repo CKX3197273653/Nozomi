@@ -140,8 +140,14 @@ public class QcReportController {
             report.setFileType(fileType);
             report.setStatus("PENDING");
             report.setInspectTime(LocalDateTime.now());
-            //调用Service保存
-            Long reportId = qcReportService.createReport(report);
+            //调用Service保存, 落库失败回滚到刚保存的附件, 文件系统不在事物中, 只能补偿
+            Long reportId ;
+            try{
+                reportId = qcReportService.createReport(report);
+            }catch(RuntimeException e){
+                deleteUploadedFile(fileUrl);
+                throw e;
+            }
             qcReportService.sendAnalyzeTask(reportId, report.getFileUrl(), report.getFileType(),prompt);
             return Result.success(reportId);
         } catch (IOException e) {
@@ -172,7 +178,7 @@ public class QcReportController {
     }
 
     //取消归档
-    @PreAuthorize("hasRole(ADMIN)")
+    @PreAuthorize("hasRole('ADMIN')")
     @PutMapping("/{id}/unarchive")
     public Result<Void> unarchiveReport(@PathVariable Long id) {
         Long operatorId = currentUser.userIdOrNull();
@@ -244,6 +250,22 @@ public class QcReportController {
             }
             // 返回文件路径
             return uploadDir + newFilename;
+    }
+    private void deleteUploadedFile(String fileUrl) {
+        if (fileUrl == null || fileUrl.isBlank()) return;
+        try{
+            Path base = Paths.get("uploads").toAbsolutePath().normalize();
+            Path f = Paths.get(fileUrl).toAbsolutePath().normalize();
+            if (!f.startsWith(base)) {
+                log.warn("[Upload] 附件不在 uploads/ 下, 跳过清理:{}",f);
+                return;
+            }
+            boolean deleted = Files.deleteIfExists(f);
+            log.warn("[Upload] 落库失败, 已回滚附件 {} -> {}",f,deleted ? "已删除" : "文件不存在");
+        }catch (Exception e){
+            //清理失败不掩盖原始异常,只记日志
+            log.warn("[Upload] 回滚附件失败: {} , {}",fileUrl,e.getMessage());
+        }
     }
     private boolean magicMatches(MultipartFile file, String fileType) {
         byte[] head;
